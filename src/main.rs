@@ -3,12 +3,13 @@ mod connection_dialog;
 mod db;
 mod db_config;
 mod schema_tree;
+mod theme;
 mod types;
 
-use iced::{Size, Theme};
+use iced::Size;
 
-fn app_theme(_state: &app::App) -> Theme {
-    Theme::TokyoNight
+fn app_theme(_state: &app::App) -> iced::Theme {
+    theme::create()
 }
 
 fn main() -> iced::Result {

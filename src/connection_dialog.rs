@@ -4,6 +4,7 @@ use iced::widget::{
 use iced::{Color, Element, Length, Theme};
 
 use crate::app::Message;
+use crate::theme;
 use crate::types::ConnectionConfig;
 
 /// State for the "Add / Edit Connection" modal panel.
@@ -115,7 +116,7 @@ impl ConnectionDialog {
                         msg: fn(String) -> Message|
          -> Column<Message> {
             column![
-                text(label).size(12).color(Color::from_rgb(0.6, 0.65, 0.75)),
+                text(label).size(12).color(theme::TEXT_MUTED),
                 text_input(placeholder.as_str(), value.as_str())
                     .on_input(msg)
                     .padding(8)
@@ -125,7 +126,7 @@ impl ConnectionDialog {
         };
 
         let password_field: Column<Message> = column![
-            text("Password").size(12).color(Color::from_rgb(0.6, 0.65, 0.75)),
+            text("Password").size(12).color(theme::TEXT_MUTED),
             text_input("password", &self.password)
                 .on_input(Message::DialogPasswordChanged)
                 .secure(true)
@@ -162,7 +163,7 @@ impl ConnectionDialog {
             form = form.push(
                 text(err.as_str())
                     .size(13)
-                    .color(Color::from_rgb(0.9, 0.35, 0.35)),
+                    .color(theme::DANGER),
             );
         }
 

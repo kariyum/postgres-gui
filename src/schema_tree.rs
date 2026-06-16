@@ -1,7 +1,8 @@
 use iced::widget::{button, row, text, Column};
-use iced::{Color, Length, Theme};
+use iced::{Length, Theme};
 
 use crate::app::Message;
+use crate::theme;
 use crate::types::{TreeNode, TreeNodeKind};
 
 /// Recursively render a tree node and its children.
@@ -28,7 +29,7 @@ pub fn render_tree<'a>(
             iced::widget::Space::new().width(Length::Fixed(indent)),
             button(
                 row![
-                    text(expand_icon).size(12).color(Color::from_rgb(0.5, 0.5, 0.6)),
+                    text(expand_icon).size(12).color(theme::TEXT_MUTED),
                     text(icon).size(14),
                     text(node.label.as_str()).size(13),
                 ]
