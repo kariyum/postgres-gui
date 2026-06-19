@@ -1,7 +1,8 @@
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
-use crate::types::ConnectionConfig;
+
+use crate::core::connection_config::ConnectionConfig;
 
 /// Returns the configuration file path: ~/.config/pgeru/connections.json
 /// On Windows, it resolves to AppData/Roaming or falls back to user profile's .config.
@@ -12,7 +13,12 @@ pub fn config_path() -> Option<PathBuf> {
         .map(PathBuf::from);
 
     if let Some(home_path) = home {
-        Some(home_path.join(".config").join("pgeru").join("connections.json"))
+        Some(
+            home_path
+                .join(".config")
+                .join("pgeru")
+                .join("connections.json"),
+        )
     } else {
         None
     }

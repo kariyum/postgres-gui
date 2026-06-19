@@ -1,10 +1,12 @@
 mod app;
-mod connection_dialog;
+mod components;
+mod core;
 mod db;
 mod db_config;
 mod schema_tree;
 mod theme;
 mod types;
+mod ui;
 
 use iced::Size;
 
@@ -21,6 +23,7 @@ fn main() -> iced::Result {
             min_size: Some(Size::new(800.0, 500.0)),
             ..Default::default()
         })
+        .scale_factor(|state| 1.0 + (state.zoom_multiplier as f32) * 0.125)
         .antialiasing(true)
         .run()
 }

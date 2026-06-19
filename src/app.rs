@@ -1,16 +1,18 @@
+use iced::color;
 use std::collections::HashMap;
 
 use iced::widget::{
-    button, column, container, row, scrollable, text, text_editor, Column, Row,
+    Column, Row, button, column, container, row, scrollable, svg, text, text_editor,
 };
 use iced::{Color, Element, Length, Padding, Task, Theme};
 use sqlx::PgPool;
 
-use crate::connection_dialog::ConnectionDialog;
+use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage};
+use crate::core::connection_config::ConnectionConfig;
 use crate::db;
 use crate::schema_tree;
 use crate::theme;
-use crate::types::{ConnectionConfig, QueryResult, TreeNode, TreeNodeKind};
+use crate::types::{QueryResult, TreeNode, TreeNodeKind};
 
 // Newtype wrapper so PgPool (which isn't Debug) can be carried in a Message.
 #[derive(Clone)]
@@ -43,14 +45,7 @@ pub enum Message {
     SchemaLoaded(String, Result<Vec<TreeNode>, String>),
 
     // Connection dialog
-    DialogNameChanged(String),
-    DialogHostChanged(String),
-    DialogPortChanged(String),
-    DialogUserChanged(String),
-    DialogPasswordChanged(String),
-    DialogDatabaseChanged(String),
-    DialogSave,
-    DialogCancel,
+    ConnectionDialogMessage(connection_dialog::DialogMessage),
 
     // Query editor
     QueryEditorAction(text_editor::Action),
@@ -62,6 +57,10 @@ pub enum Message {
 
     // Layout
     ToggleSidebar,
+
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
 
     Noop,
 }
@@ -97,7 +96,6 @@ impl Tab {
 
 // ─── Application state ─────────────────────────────────────────────────────────
 
-
 #[derive(Debug)]
 pub struct App {
     pub connections: Vec<ConnectionConfig>,
@@ -107,6 +105,7 @@ pub struct App {
     pub dialog: ConnectionDialog,
     pub connection_status: HashMap<String, String>,
     pub sidebar_open: bool,
+    pub zoom_multiplier: u8,
 }
 
 impl Default for App {
@@ -119,10 +118,10 @@ impl Default for App {
             dialog: ConnectionDialog::default(),
             connection_status: HashMap::new(),
             sidebar_open: true,
+            zoom_multiplier: 0,
         }
     }
 }
-
 
 // ─── Update ────────────────────────────────────────────────────────────────────
 
@@ -150,53 +149,29 @@ impl App {
                 }
                 Task::none()
             }
-            Message::DialogNameChanged(v) => {
-                self.dialog.name = v;
-                Task::none()
-            }
-            Message::DialogHostChanged(v) => {
-                self.dialog.host = v;
-                Task::none()
-            }
-            Message::DialogPortChanged(v) => {
-                self.dialog.port = v;
-                Task::none()
-            }
-            Message::DialogUserChanged(v) => {
-                self.dialog.user = v;
-                Task::none()
-            }
-            Message::DialogPasswordChanged(v) => {
-                self.dialog.password = v;
-                Task::none()
-            }
-            Message::DialogDatabaseChanged(v) => {
-                self.dialog.database = v;
-                Task::none()
-            }
-            Message::DialogCancel => {
-                self.dialog.close();
-                Task::none()
-            }
-            Message::DialogSave => match self.dialog.build_config() {
-                Err(e) => {
-                    self.dialog.error = Some(e);
-                    Task::none()
-                }
-                Ok(cfg) => {
-                    if let Some(existing) =
-                        self.connections.iter_mut().find(|c| c.id == cfg.id)
-                    {
-                        *existing = cfg;
-                    } else {
-                        self.connections.push(cfg);
+            Message::ConnectionDialogMessage(msg) => match msg {
+                DialogMessage::DialogSave => match self.dialog.build_config() {
+                    Err(e) => {
+                        self.dialog.error = Some(e);
+                        Task::none()
                     }
-                    let _ = crate::db_config::save_connections(&self.connections);
-                    self.dialog.close();
-                    Task::none()
-                }
+                    Ok(cfg) => {
+                        if let Some(existing) = self.connections.iter_mut().find(|c| c.id == cfg.id)
+                        {
+                            *existing = cfg;
+                        } else {
+                            self.connections.push(cfg);
+                        }
+                        let _ = crate::db_config::save_connections(&self.connections);
+                        self.dialog.close();
+                        Task::none()
+                    }
+                },
+                _ => self
+                    .dialog
+                    .update(msg)
+                    .map(Message::ConnectionDialogMessage),
             },
-
             // ── Connect ──────────────────────────────────────────────────────
             Message::ConnectTo(id) => {
                 let cfg = match self.connections.iter().find(|c| c.id == id) {
@@ -233,8 +208,7 @@ impl App {
                     }
                     Err(e) => {
                         let short = e[..e.len().min(80)].to_string();
-                        self.connection_status
-                            .insert(id, format!("Error: {short}"));
+                        self.connection_status.insert(id, format!("Error: {short}"));
                         Task::none()
                     }
                 }
@@ -356,6 +330,23 @@ impl App {
                 Task::none()
             }
 
+            Message::ZoomIn => {
+                self.zoom_multiplier += 1;
+                Task::none()
+            }
+
+            Message::ZoomOut => {
+                if self.zoom_multiplier > 0 {
+                    self.zoom_multiplier -= 1;
+                }
+                Task::none()
+            }
+
+            Message::ZoomReset => {
+                self.zoom_multiplier = 0;
+                Task::none()
+            }
+
             Message::Noop => Task::none(),
         }
     }
@@ -366,12 +357,7 @@ impl App {
         let main = self.view_main();
 
         let layout: Element<Message> = if self.sidebar_open {
-            row![
-                self.view_sidebar(),
-                iced::widget::rule::vertical(1),
-                main,
-            ]
-            .into()
+            row![self.view_sidebar(), iced::widget::rule::vertical(1), main,].into()
         } else {
             row![
                 container(
@@ -391,11 +377,10 @@ impl App {
         };
 
         // Overlay dialog on top if visible
-        if self.dialog.visible {
-            let dialog = self.dialog.view();
+        if let Some(dialog) = self.dialog.view() {
             iced::widget::stack![
                 layout,
-                container(dialog)
+                container(dialog.map(Message::ConnectionDialogMessage))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .align_x(iced::Alignment::Center)
@@ -418,22 +403,29 @@ impl App {
             row![
                 text("Connections").size(13),
                 iced::widget::Space::new().width(Length::Fill),
-                button(text("+").size(16))
-                    .on_press(Message::AddConnection)
-                    .padding([2, 10])
-                    .style(iced::widget::button::primary),
-                button(text("❮").size(12))
-                    .on_press(Message::ToggleSidebar)
-                    .padding([2, 6])
-                    .style(iced::widget::button::secondary),
+                button(row![
+                    svg(svg::Handle::from_memory(include_bytes!(
+                        "resources/plus.svg"
+                    )))
+                    .width(16)
+                    .height(16)
+                    .style(|_theme, _status| svg::Style {
+                        color: Some(color!(255, 255, 255))
+                    }),
+                ])
+                .on_press(Message::AddConnection)
+                .padding([5, 10])
+                .style(iced::widget::button::primary),
+                // button(text("❮").size(12))
+                //     .on_press(Message::ToggleSidebar)
+                //     .padding([2, 6])
+                //     .style(iced::widget::button::secondary),
             ]
             .align_y(iced::Alignment::Center),
         )
         .padding([10, 12]);
 
-        let mut conn_list = Column::new()
-            .spacing(4)
-            .padding(Padding::from([0, 0])); // bottom padding handled by items
+        let mut conn_list = Column::new().spacing(4).padding(Padding::from([0, 0])); // bottom padding handled by items
 
         for cfg in &self.connections {
             let is_connected = self.tabs.iter().any(|t| t.conn_id == cfg.id);
@@ -525,12 +517,8 @@ impl App {
             // Connection status message (e.g. "Connecting…" or "Error: …")
             if let Some(status_msg) = self.connection_status.get(&cfg_id_2) {
                 conn_list = conn_list.push(
-                    container(
-                        text(status_msg.as_str())
-                            .size(11)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .padding([0, 18]),
+                    container(text(status_msg.as_str()).size(11).color(theme::TEXT_MUTED))
+                        .padding([0, 18]),
                 );
             }
 
@@ -539,21 +527,13 @@ impl App {
                 if let Some(tab) = self.tabs.iter().find(|t| t.conn_id == cfg.id) {
                     if tab.schema_loading {
                         conn_list = conn_list.push(
-                            container(
-                                text("  Loading schema…")
-                                    .size(11)
-                                    .color(theme::TEXT_MUTED),
-                            )
-                            .padding([2, 16]),
+                            container(text("  Loading schema…").size(11).color(theme::TEXT_MUTED))
+                                .padding([2, 16]),
                         );
                     } else if !tab.schema_tree.is_empty() {
                         conn_list = conn_list.push(
-                            container(schema_tree::render_tree(
-                                &tab.schema_tree,
-                                0,
-                                &cfg.id,
-                            ))
-                            .padding([0, 6]),
+                            container(schema_tree::render_tree(&tab.schema_tree, 0, &cfg.id))
+                                .padding([0, 6]),
                         );
                     }
                 }
@@ -564,8 +544,12 @@ impl App {
             conn_list = conn_list.push(
                 container(
                     column![
-                        text("No connections yet.").size(13).color(theme::TEXT_MUTED),
-                        text("Click + to add one.").size(12).color(theme::TEXT_MUTED),
+                        text("No connections yet.")
+                            .size(13)
+                            .color(theme::TEXT_MUTED),
+                        text("Click + to add one.")
+                            .size(12)
+                            .color(theme::TEXT_MUTED),
                     ]
                     .spacing(4)
                     .align_x(iced::Alignment::Center),
@@ -600,17 +584,13 @@ impl App {
             self.view_welcome()
         };
 
-        column![
-            tab_bar,
-            iced::widget::rule::horizontal(1),
-            body,
-        ]
-        .height(Length::Fill)
-        .into()
+        column![tab_bar, iced::widget::rule::horizontal(1), body,]
+            .height(Length::Fill)
+            .into()
     }
 
     fn view_tab_bar(&self) -> Element<'_, Message> {
-        let mut tabs_row = Row::new().spacing(2).align_y(iced::Alignment::Center);
+        let mut tabs_row = Row::new().align_y(iced::Alignment::Center);
 
         for tab in &self.tabs {
             let name: String = self
@@ -701,9 +681,15 @@ impl App {
                 text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
                 iced::widget::Space::new().height(Length::Fixed(24.0)),
                 column![
-                    text("📋  Add a connection  →  click  +  in the sidebar").size(14).color(theme::TEXT_MUTED),
-                    text("🔌  Connect  →  click  ▶  on a saved connection").size(14).color(theme::TEXT_MUTED),
-                    text("⌨   Run queries  →  type SQL & press  F5  or click  Run").size(14).color(theme::TEXT_MUTED),
+                    text("📋  Add a connection  →  click  +  in the sidebar")
+                        .size(14)
+                        .color(theme::TEXT_MUTED),
+                    text("🔌  Connect  →  click  ▶  on a saved connection")
+                        .size(14)
+                        .color(theme::TEXT_MUTED),
+                    text("⌨   Run queries  →  type SQL & press  F5  or click  Run")
+                        .size(14)
+                        .color(theme::TEXT_MUTED),
                 ]
                 .spacing(8)
                 .align_x(iced::Alignment::Start),
@@ -722,21 +708,16 @@ impl App {
         // ── Toolbar ──────────────────────────────────────────────────────────
         let run_btn = if tab.running {
             button(
-                row![
-                    text("⏳").size(13),
-                    text(" Running…").size(13),
-                ]
-                .align_y(iced::Alignment::Center),
+                row![text("⏳").size(13), text(" Running…").size(13),]
+                    .align_y(iced::Alignment::Center),
             )
             .padding([6, 16])
             .style(iced::widget::button::secondary)
         } else {
-            button(
-                row![text("▶  Run").size(13)].align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::RunQuery)
-            .padding([6, 16])
-            .style(iced::widget::button::primary)
+            button(row![text("▶  Run").size(13)].align_y(iced::Alignment::Center))
+                .on_press(Message::RunQuery)
+                .padding([6, 16])
+                .style(iced::widget::button::primary)
         };
 
         let conn_info = self
@@ -752,9 +733,7 @@ impl App {
                 text("F5").size(11).color(theme::TEXT_MUTED),
                 iced::widget::Space::new().width(Length::Fill),
                 iced::widget::Space::new().width(Length::Fill),
-                text(conn_info)
-                    .size(11)
-                    .color(theme::SUCCESS),
+                text(conn_info).size(11).color(theme::SUCCESS),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
@@ -795,10 +774,13 @@ impl App {
                 column![
                     row![
                         text("⚠ ").size(14).color(theme::DANGER),
-                        text("Error").size(14).color(theme::DANGER).font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..iced::Font::DEFAULT
-                        }),
+                        text("Error")
+                            .size(14)
+                            .color(theme::DANGER)
+                            .font(iced::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..iced::Font::DEFAULT
+                            }),
                     ]
                     .align_y(iced::Alignment::Center),
                     text(err.as_str())
@@ -839,7 +821,11 @@ impl App {
             let count_info = if qr.columns.is_empty() {
                 format!("{}", qr.message)
             } else {
-                format!("{} row(s)  |  {} column(s)", qr.rows.len(), qr.columns.len())
+                format!(
+                    "{} row(s)  |  {} column(s)",
+                    qr.rows.len(),
+                    qr.columns.len()
+                )
             };
             container(
                 row![
@@ -878,8 +864,11 @@ impl App {
             iced::widget::rule::horizontal(1),
             editor,
             iced::widget::rule::horizontal(1),
-            scrollable(results_area)
-                .height(if has_result { Length::FillPortion(2) } else { Length::Fill }),
+            scrollable(results_area).height(if has_result {
+                Length::FillPortion(2)
+            } else {
+                Length::Fill
+            }),
             iced::widget::rule::horizontal(1),
             status_bar,
         ]
@@ -889,13 +878,9 @@ impl App {
 
     fn view_results_table<'a>(&'a self, qr: &'a QueryResult) -> Element<'a, Message> {
         if qr.columns.is_empty() {
-            return container(
-                text(qr.message.as_str())
-                    .size(13)
-                    .color(theme::SUCCESS),
-            )
-            .padding(16)
-            .into();
+            return container(text(qr.message.as_str()).size(13).color(theme::SUCCESS))
+                .padding(16)
+                .into();
         }
 
         // Calculate column widths from header + data
@@ -928,12 +913,10 @@ impl App {
             );
             for (col, &w) in qr.columns.iter().zip(col_widths.iter()) {
                 header_row = header_row.push(
-                    container(
-                        text(col.name.as_str()).size(12).font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..iced::Font::DEFAULT
-                        }),
-                    )
+                    container(text(col.name.as_str()).size(12).font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }))
                     .width(Length::Fixed(w))
                     .padding([7, 8]),
                 );
@@ -999,23 +982,14 @@ impl App {
                 }
             };
 
-            data_col = data_col.push(
-                container(data_row)
-                    .style(row_bg_style)
-                    .width(Length::Fill),
-            );
+            data_col = data_col.push(container(data_row).style(row_bg_style).width(Length::Fill));
         }
 
         // Horizontally scrollable body
-        let table_body = scrollable(data_col)
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
-            ));
+        let table_body = scrollable(data_col).direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default(),
+        ));
 
-        column![
-            header,
-            scrollable(table_body).height(Length::Fill),
-        ]
-        .into()
+        column![header, scrollable(table_body).height(Length::Fill),].into()
     }
 }
