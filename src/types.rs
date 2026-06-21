@@ -1,6 +1,3 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 /// A column in a query result.
 #[derive(Debug, Clone)]
 pub struct ResultColumn {

@@ -1,9 +1,9 @@
-use iced::widget::{Column, Row, TextInput, button, column, container, row, text, text_input};
+use iced::widget::{Row, button, column, container, row, text};
 use iced::{Color, Element, Length, Task, Theme};
 
 use crate::core::connection_config::ConnectionConfig;
 use crate::theme;
-use crate::ui::input_field::{self, InputField, InputFieldMessage};
+use crate::ui::input_field::{InputField, InputFieldMessage};
 
 #[derive(Debug, Clone)]
 pub struct ConnectionDialog {
@@ -23,7 +23,10 @@ pub enum DialogMessage {
     DialogPasswordField(InputFieldMessage),
     DialogDatabaseField(InputFieldMessage),
     DialogSave,
-    DialogCancel,
+    DialogSaved(ConnectionConfig),
+    DialogClose,
+    OpenNew,
+    OpenEdit(ConnectionConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -88,17 +91,17 @@ impl Default for ConnectionDialog {
 }
 
 impl ConnectionDialog {
-    pub fn open_new(&mut self) {
+    fn open_new(&mut self) {
         *self = Self::default();
         self.visible = true;
     }
 
-    pub fn open_edit(&mut self, cfg: &ConnectionConfig) {
+    fn open_edit(&mut self, cfg: ConnectionConfig) {
         self.visible = true;
         self.editing_id = Some(cfg.id.clone());
         self.error = None;
         self.cfg = cfg.clone();
-        self.form = Form::new(self.cfg.clone())
+        self.form = Form::new(cfg)
     }
 
     pub fn close(&mut self) {
@@ -130,12 +133,12 @@ impl ConnectionDialog {
         }
 
         let mut cfg = ConnectionConfig::new(
-            self.cfg.name.trim().to_string(),
-            self.cfg.host.trim().to_string(),
+            self.form.name.value.trim().to_string(),
+            self.form.host.value.trim().to_string(),
             port,
-            self.cfg.user.trim().to_string(),
-            self.cfg.password.clone(),
-            self.cfg.database.trim().to_string(),
+            self.form.user.value.trim().to_string(),
+            self.form.password.value.clone(),
+            self.form.database.value.trim().to_string(),
         );
 
         if let Some(ref id) = self.editing_id {
@@ -185,7 +188,7 @@ impl ConnectionDialog {
 
         let actions: Row<DialogMessage> = row![
             button(text("Cancel").size(14))
-                .on_press(DialogMessage::DialogCancel)
+                .on_press(DialogMessage::DialogClose)
                 .padding([8, 18])
                 .style(iced::widget::button::secondary),
             button(text("Save").size(14))
@@ -250,9 +253,24 @@ impl ConnectionDialog {
                 .database
                 .update(msg)
                 .map(DialogMessage::DialogDatabaseField),
-            DialogMessage::DialogSave => todo!(),
-            DialogMessage::DialogCancel => {
+            DialogMessage::DialogSave => match self.build_config() {
+                Err(e) => {
+                    self.error = Some(e);
+                    Task::none()
+                }
+                Ok(cfg) => Task::done(DialogMessage::DialogSaved(cfg)),
+            },
+            DialogMessage::DialogSaved(_) => Task::none(),
+            DialogMessage::DialogClose => {
                 self.close();
+                Task::none()
+            }
+            DialogMessage::OpenNew => {
+                self.open_new();
+                Task::none()
+            }
+            DialogMessage::OpenEdit(cfg) => {
+                self.open_edit(cfg);
                 Task::none()
             }
         }

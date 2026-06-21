@@ -1,12 +1,11 @@
 use iced::{Element, Length, Task};
 
 use crate::theme;
-use iced::widget::{Column, column, text, text_input};
+use iced::widget::{column, text, text_input};
 
 #[derive(Debug, Clone)]
 pub enum InputFieldMessage {
     InputChanged(String),
-    Noop,
 }
 
 #[derive(Debug, Clone)]
@@ -83,7 +82,6 @@ impl InputField {
                 self.value = new_value;
                 Task::none()
             }
-            InputFieldMessage::Noop => Task::none(),
         }
     }
 }
