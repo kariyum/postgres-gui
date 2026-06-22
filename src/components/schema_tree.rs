@@ -1,7 +1,6 @@
 use iced::widget::{Column, button, row, svg, text};
 use iced::{Length, Task, Theme};
 
-use crate::theme;
 use crate::types::{TreeNode, TreeNodeKind};
 
 #[derive(Debug, Clone)]

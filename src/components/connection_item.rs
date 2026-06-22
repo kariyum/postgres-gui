@@ -3,25 +3,12 @@ use std::fmt::Display;
 use iced::widget::{
     Column, Row, button, column, container, row, scrollable, svg, text, text_editor,
 };
-use iced::{Color, Element, Length, Task, Theme};
+use iced::{Background, Border, Color, Element, Length, Task, Theme, color};
 
 use crate::components::schema_tree::{self, SchemaTree, TreeMessage};
 use crate::core::connection_config::ConnectionConfig;
 use crate::theme;
 use crate::types::{QueryResult, TreeNode};
-
-// ─── PoolMsg wrapper ──────────────────────────────────────────────────────
-
-#[derive(Clone)]
-pub struct PoolMsg(pub sqlx::PgPool);
-
-impl std::fmt::Debug for PoolMsg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PoolMsg")
-    }
-}
-
-// ─── Model ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ConnectionStatus {
@@ -53,15 +40,11 @@ pub struct ConnectionItem {
     pub schema_tree: SchemaTree,
     pub schema_loading: bool,
     pub connection_status: ConnectionStatus,
-    pub is_active: bool,
     pub actions_open: bool,
 }
 
-// ─── Messages ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub enum ItemMessage {
-    // Actions — parent intercepts
     ConnectRequested,
     DisconnectRequested,
     EditRequested,
@@ -71,18 +54,15 @@ pub enum ItemMessage {
     RunQuery,
     Select,
 
-    // Internal — ConnectionItem::update handles
+    UpdateConfig(ConnectionConfig),
+
     EditorAction(text_editor::Action),
     SchemaTreeMessage(schema_tree::TreeMessage),
     SchemaLoaded(Result<Vec<TreeNode>, String>),
     QueryResult(Result<QueryResult, String>),
-    SetActive(bool),
-    ConnectionSucceeded(PoolMsg),
-    ConnectionFailed(String),
-    ShowActions,
+    ConnectSucceeded(sqlx::PgPool),
+    ConnectFailed(String),
 }
-
-// ─── Constructor ────────────────────────────────────────────────────────────
 
 impl ConnectionItem {
     pub fn new(cfg: ConnectionConfig) -> Self {
@@ -95,22 +75,18 @@ impl ConnectionItem {
             schema_tree: SchemaTree::new(Vec::new()),
             schema_loading: false,
             connection_status: ConnectionStatus::Disconnected,
-            is_active: false,
             actions_open: false,
             cfg,
         }
     }
 }
 
-// ─── Update ─────────────────────────────────────────────────────────────────
-
 impl ConnectionItem {
     pub fn update(&mut self, message: ItemMessage) -> Task<ItemMessage> {
         match message {
-            // ── Action parent-intercepted — child only sets state, returns Task::done ──
             ItemMessage::ConnectRequested => {
                 self.connection_status = ConnectionStatus::Connecting;
-                Task::done(ItemMessage::ConnectRequested)
+                Task::none()
             }
             ItemMessage::DisconnectRequested => {
                 self.pool = None;
@@ -119,30 +95,32 @@ impl ConnectionItem {
                 self.result = None;
                 self.error = None;
                 self.connection_status = ConnectionStatus::Disconnected;
-                self.is_active = false;
-                Task::done(ItemMessage::DisconnectRequested)
+                Task::none()
             }
             ItemMessage::RunQuery => {
                 self.running = true;
                 self.result = None;
                 self.error = None;
-                Task::done(ItemMessage::RunQuery)
+                Task::none()
             }
 
-            // ── Connect result ───────────────────────────────────────────
-            ItemMessage::ConnectionSucceeded(pool) => {
-                self.pool = Some(pool.0);
-                self.connection_status = ConnectionStatus::Disconnected;
+            ItemMessage::UpdateConfig(cfg) => {
+                self.cfg = cfg;
+                Task::none()
+            }
+
+            ItemMessage::ConnectSucceeded(pool) => {
+                self.pool = Some(pool);
+                self.connection_status = ConnectionStatus::Connected;
                 self.schema_loading = true;
                 Task::none()
             }
-            ItemMessage::ConnectionFailed(err) => {
+            ItemMessage::ConnectFailed(err) => {
                 let short = err[..err.len().min(80)].to_string();
                 self.connection_status = ConnectionStatus::Error(format!("Error: {short}"));
                 Task::none()
             }
 
-            // ── Schema tree ──────────────────────────────────────────────
             ItemMessage::SchemaTreeMessage(msg) => match msg {
                 TreeMessage::SelectTable(schema, table) => {
                     let sql = format!("SELECT * FROM \"{schema}\".\"{table}\" LIMIT 100;");
@@ -179,18 +157,6 @@ impl ConnectionItem {
                 Task::none()
             }
 
-            // ── Display state ────────────────────────────────────────────
-            ItemMessage::SetActive(active) => {
-                self.is_active = active;
-                Task::none()
-            }
-            ItemMessage::ShowActions => {
-                self.actions_open = !self.actions_open;
-                Task::none()
-            }
-
-            // ── Action messages — parent must intercept these;
-            // if they reach here they're a no-op.
             ItemMessage::EditRequested
             | ItemMessage::DeleteRequested
             | ItemMessage::DuplicateRequested
@@ -200,24 +166,9 @@ impl ConnectionItem {
     }
 }
 
-// ─── View: sidebar row ──────────────────────────────────────────────────────
-
 impl ConnectionItem {
     pub fn view(&self) -> Column<'_, ItemMessage> {
         let is_connected = self.pool.is_some();
-
-        // let status_dot = svg(svg::Handle::from_memory(include_bytes!(
-        //     "../resources/dot.svg"
-        // )))
-        // .width(8)
-        // .height(8)
-        // .style(move |_theme, _status| svg::Style {
-        //     color: Some(if is_connected {
-        //         theme::SUCCESS
-        //     } else {
-        //         theme::TEXT_MUTED
-        //     }),
-        // });
 
         let conn_row = button(
             row![
@@ -232,7 +183,7 @@ impl ConnectionItem {
             let palette = theme.extended_palette();
             if self.connection_status == ConnectionStatus::Connected {
                 button::Style {
-                    background: Some(palette.primary.weak.color.into()),
+                    background: Some(color!(0x155c2b, 0.2).into()),
                     text_color: palette.primary.weak.text,
                     ..Default::default()
                 }
@@ -383,13 +334,8 @@ impl ConnectionItem {
 
         col
     }
-}
 
-// ─── View: editor panel ─────────────────────────────────────────────────────
-
-impl ConnectionItem {
     pub fn view_editor(&self) -> Element<'_, ItemMessage> {
-        // ── Toolbar ───────────────────────────────────────────────────────
         let run_btn = if self.running {
             button(
                 row![text("⏳").size(13), text(" Running…").size(13),]
@@ -398,10 +344,21 @@ impl ConnectionItem {
             .padding([6, 16])
             .style(iced::widget::button::secondary)
         } else {
-            button(row![text("▶  Run").size(13)].align_y(iced::Alignment::Center))
-                .on_press(ItemMessage::RunQuery)
-                .padding([6, 16])
-                .style(iced::widget::button::primary)
+            button(
+                row![
+                    svg(svg::Handle::from_memory(include_bytes!(
+                        "../resources/play.svg"
+                    )))
+                    .height(12)
+                    .width(12),
+                    text("Run").size(13)
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(ItemMessage::RunQuery)
+            .padding([6, 16])
+            .style(iced::widget::button::primary)
         };
 
         let conn_info = format!(
@@ -412,35 +369,46 @@ impl ConnectionItem {
         let toolbar = container(
             row![
                 run_btn,
-                text("F5").size(11).color(theme::TEXT_MUTED),
                 iced::widget::Space::new().width(Length::Fill),
-                iced::widget::Space::new().width(Length::Fill),
-                text(conn_info).size(11).color(theme::SUCCESS),
+                text(conn_info).size(11).color(theme::TEXT_MUTED),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
         )
         .padding([6, 10]);
 
-        // ── Editor ────────────────────────────────────────────────────────
         let editor = container(
             text_editor(&self.editor)
                 .on_action(ItemMessage::EditorAction)
                 .height(Length::FillPortion(1))
                 .font(iced::Font::MONOSPACE)
                 .size(14)
-                .padding(10),
+                .style(|_theme, _status| text_editor::Style {
+                    background: Background::Color(Color::TRANSPARENT),
+                    border: iced::Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: iced::border::Radius::new(0),
+                    },
+                    placeholder: Color::WHITE,
+                    selection: Color::WHITE,
+                    value: Color::WHITE,
+                }),
         )
-        .padding([4, 10])
         .style(|theme: &Theme| {
             let palette = theme.extended_palette();
             iced::widget::container::Style {
                 background: Some(palette.background.base.color.into()),
+                border: iced::Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: iced::border::Radius::new(0),
+                },
+                text_color: Some(Color::from_rgb(1.0, 0.0, 0.0)),
                 ..Default::default()
             }
         });
 
-        // ── Results area ──────────────────────────────────────────────────
         let results_area: Element<ItemMessage> = if self.running {
             container(
                 row![

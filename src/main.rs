@@ -1,5 +1,6 @@
 mod app;
 mod components;
+mod connection_manager;
 mod core;
 mod db;
 mod db_config;
@@ -21,7 +22,11 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
                 .await
                 .unwrap_or_default()
         },
-        app::Message::ConnectionsLoaded,
+        |configs| {
+            app::Message::ConnManager(crate::connection_manager::ConnManagerMessage::ConnectionsLoaded(
+                configs,
+            ))
+        },
     );
     (app, task)
 }
