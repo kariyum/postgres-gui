@@ -11,7 +11,7 @@ pub fn create() -> Theme {
     Theme::custom(
         "pgeru",
         Palette {
-            background: Color::from_rgb8(0xff, 0xff, 0xff),
+            background: Color::from_rgb8(0x0d, 0x11, 0x17),
             text: TEXT,
             primary: PRIMARY,
             success: SUCCESS,
