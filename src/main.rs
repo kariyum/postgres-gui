@@ -23,9 +23,9 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
                 .unwrap_or_default()
         },
         |configs| {
-            app::Message::ConnManager(crate::connection_manager::ConnManagerMessage::ConnectionsLoaded(
-                configs,
-            ))
+            app::Message::ConnManager(
+                crate::connection_manager::ConnManagerMessage::ConnectionsLoaded(configs),
+            )
         },
     );
     (app, task)
@@ -40,7 +40,9 @@ fn main() -> iced::Result {
             min_size: Some(Size::new(800.0, 500.0)),
             ..Default::default()
         })
-        .scale_factor(|state| 1.5 + (state.zoom_multiplier as f32) * 0.125)
+        .decorations(false)
+        .centered()
+        .scale_factor(|state| 1.0 + (state.zoom_multiplier as f32) * 0.125)
         .antialiasing(true)
         .run()
 }

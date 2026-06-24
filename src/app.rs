@@ -1,5 +1,8 @@
-use iced::widget::{button, column, container, row, text};
-use iced::{Color, Element, Length, Task, Theme};
+use iced::widget::space::horizontal;
+use iced::widget::text::Alignment;
+use iced::widget::{button, column, container, mouse_area, row, svg, text};
+use iced::window;
+use iced::{Color, Element, Length, Point, Task, Theme};
 
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
@@ -13,12 +16,15 @@ pub enum Message {
     Sidebar(SidebarMessage),
     TabBar(TabBarMessage),
     ConnManager(ConnManagerMessage),
-
+    Close,
+    Drag,
+    ToggleMaximize,
+    PositionSaved(Option<Point>),
+    RestorePosition,
     ToggleSidebar,
     ZoomIn,
     ZoomOut,
     ZoomReset,
-
     Noop,
 }
 
@@ -28,6 +34,8 @@ pub struct App {
     pub dialog: ConnectionDialog,
     pub sidebar_open: bool,
     pub zoom_multiplier: u8,
+    pub is_maximized: bool,
+    pub saved_position: Option<Point>,
 }
 
 impl Default for App {
@@ -37,6 +45,8 @@ impl Default for App {
             dialog: ConnectionDialog::default(),
             sidebar_open: true,
             zoom_multiplier: 0,
+            is_maximized: false,
+            saved_position: None,
         }
     }
 }
@@ -92,33 +102,44 @@ impl App {
                 Task::none()
             }
 
+            Message::Close => iced::exit(),
+            Message::Drag => window::latest().and_then(window::drag),
+            Message::ToggleMaximize => {
+                if self.is_maximized {
+                    self.is_maximized = false;
+                    window::latest()
+                        .and_then(window::toggle_maximize)
+                        .map(|()| Message::RestorePosition)
+                } else {
+                    self.is_maximized = true;
+                    window::latest()
+                        .and_then(window::position)
+                        .map(Message::PositionSaved)
+                }
+            }
+            Message::PositionSaved(pos) => {
+                self.saved_position = pos;
+                window::latest().and_then(window::toggle_maximize)
+            }
+            Message::RestorePosition => {
+                if let Some(pos) = self.saved_position.take() {
+                    window::latest().and_then(move |id| window::move_to(id, pos))
+                } else {
+                    Task::none()
+                }
+            }
             Message::Noop => Task::none(),
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         let main = self.view_main();
+        let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
 
-        let layout: Element<Message> = if self.sidebar_open {
-            let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
-            row![sidebar, iced::widget::rule::vertical(1), main,].into()
-        } else {
-            row![
-                container(
-                    button(text("☰").size(16))
-                        .on_press(Message::ToggleSidebar)
-                        .padding([6, 8])
-                        .style(iced::widget::button::secondary),
-                )
-                .padding([4, 0])
-                .width(Length::Fixed(32.0))
-                .height(Length::Fill)
-                .align_y(iced::Alignment::Start),
-                iced::widget::rule::vertical(1),
-                main,
-            ]
-            .into()
-        };
+        let layout = column![
+            self.view_title_bar(),
+            row![sidebar, iced::widget::rule::vertical(1), main,]
+        ];
 
         if let Some(dialog) = self.dialog.view() {
             iced::widget::stack![
@@ -137,7 +158,7 @@ impl App {
             ]
             .into()
         } else {
-            layout
+            layout.into()
         }
     }
 
@@ -158,5 +179,28 @@ impl App {
         };
 
         container(body).height(Length::Fill).into()
+    }
+
+    fn view_title_bar(&self) -> Element<'_, Message> {
+        let title = text("pgeru").size(13).align_x(Alignment::Left);
+        let close_button = button(
+            svg(svg::Handle::from_memory(include_bytes!("resources/x.svg")))
+                .height(14)
+                .width(14)
+                .style(|_theme, _status| svg::Style {
+                    color: Some(Color::WHITE),
+                }),
+        )
+        .on_press(Message::Close)
+        .style(|_theme, _status| button::Style {
+            ..Default::default()
+        });
+        let draggable_area = mouse_area(row![title, horizontal()])
+            .on_press(Message::Drag)
+            .on_double_click(Message::ToggleMaximize);
+        row![draggable_area, close_button]
+            .width(Length::Fill)
+            .padding([4, 8])
+            .into()
     }
 }

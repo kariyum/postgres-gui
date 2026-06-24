@@ -38,7 +38,6 @@ pub fn load_connections() -> Vec<ConnectionConfig> {
     Vec::new()
 }
 
-/// Save connections to disk.
 pub fn save_connections(conns: &[ConnectionConfig]) -> Result<(), String> {
     if let Some(path) = config_path() {
         if let Some(parent) = path.parent() {
