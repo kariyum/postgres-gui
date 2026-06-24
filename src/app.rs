@@ -32,7 +32,6 @@ pub enum Message {
 pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
-    pub sidebar_open: bool,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
@@ -43,7 +42,6 @@ impl Default for App {
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
-            sidebar_open: true,
             zoom_multiplier: 0,
             is_maximized: false,
             saved_position: None,
@@ -83,10 +81,6 @@ impl App {
                 task.map(Message::ConnManager)
             }
 
-            Message::ToggleSidebar => {
-                self.sidebar_open = !self.sidebar_open;
-                Task::none()
-            }
             Message::ZoomIn => {
                 self.zoom_multiplier += 1;
                 Task::none()
@@ -128,6 +122,7 @@ impl App {
                     Task::none()
                 }
             }
+            Message::ToggleSidebar => Task::none(),
             Message::Noop => Task::none(),
         }
     }

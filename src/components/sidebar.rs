@@ -20,8 +20,8 @@ pub fn view<'a>(items: &'a [ConnectionItem]) -> Element<'a, SidebarMessage> {
                 svg(svg::Handle::from_memory(include_bytes!(
                     "../resources/plus.svg"
                 )))
-                .width(16)
-                .height(16)
+                .width(14)
+                .height(14)
                 .style(|_theme, _status| svg::Style {
                     color: Some(iced::color!(255, 255, 255))
                 }),
