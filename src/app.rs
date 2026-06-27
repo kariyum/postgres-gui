@@ -1,20 +1,17 @@
 use iced::widget::space::horizontal;
-use iced::widget::text::Alignment;
-use iced::widget::{button, column, container, mouse_area, row, svg, text};
-use iced::window;
+use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Color, Element, Length, Point, Task, Theme};
+use iced::{Subscription, window};
 
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
-use crate::components::tab_bar::{self, TabBarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Sidebar(SidebarMessage),
-    TabBar(TabBarMessage),
     ConnManager(ConnManagerMessage),
     Close,
     Drag,
@@ -60,18 +57,6 @@ impl App {
                     ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::Select),
                 )),
                 SidebarMessage::ItemMessage(id, item_msg) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(id, item_msg),
-                )),
-            },
-
-            Message::TabBar(msg) => match msg {
-                TabBarMessage::SelectTab(id) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::Select),
-                )),
-                TabBarMessage::CloseTab(id) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::DisconnectRequested),
-                )),
-                TabBarMessage::ItemMessage(id, item_msg) => Task::done(Message::ConnManager(
                     ConnManagerMessage::ConnectionItemMessage(id, item_msg),
                 )),
             },
@@ -131,10 +116,15 @@ impl App {
         let main = self.view_main();
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
 
-        let layout = column![
+        let layout = container(column![
             self.view_title_bar(),
             row![sidebar, iced::widget::rule::vertical(1), main,]
-        ];
+        ])
+        .style(|_theme: &Theme| -> container::Style {
+            container::Style::default()
+                .background(iced::Background::Color(_theme.palette().background))
+                .border(iced::Border::default().rounded(12))
+        });
 
         if let Some(dialog) = self.dialog.view() {
             iced::widget::stack![
@@ -177,25 +167,54 @@ impl App {
     }
 
     fn view_title_bar(&self) -> Element<'_, Message> {
-        let title = text("pgeru").size(13).align_x(Alignment::Left);
+        let title = container(text("pgeru").size(13).align_x(text::Alignment::Left))
+            .padding(iced::padding::left(8));
         let close_button = button(
             svg(svg::Handle::from_memory(include_bytes!("resources/x.svg")))
-                .height(14)
-                .width(14)
+                .height(16)
+                .width(16)
                 .style(|_theme, _status| svg::Style {
                     color: Some(Color::WHITE),
                 }),
         )
         .on_press(Message::Close)
         .style(|_theme, _status| button::Style {
+            background: Some(iced::Background::Color(Color::TRANSPARENT)),
             ..Default::default()
         });
         let draggable_area = mouse_area(row![title, horizontal()])
             .on_press(Message::Drag)
             .on_double_click(Message::ToggleMaximize);
-        row![draggable_area, close_button]
-            .width(Length::Fill)
-            .padding([4, 8])
-            .into()
+
+        container(column![
+            row![draggable_area, close_button]
+                .width(Length::Fill)
+                .align_y(iced::Alignment::Center),
+            rule::horizontal(1.0)
+        ])
+        .style(|theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.extended_palette().background.strong.color,
+            )),
+            ..Default::default()
+        })
+        .into()
+    }
+
+    pub fn key_press_handler(&self) -> Subscription<Message> {
+        iced::keyboard::listen().filter_map(|event| match event {
+            iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
+                match (modifiers, key.as_ref()) {
+                    (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("=")) => {
+                        Some(Message::ZoomIn)
+                    }
+                    (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("-")) => {
+                        Some(Message::ZoomOut)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
     }
 }
