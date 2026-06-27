@@ -6,33 +6,11 @@ use crate::theme;
 
 #[derive(Debug, Clone)]
 pub enum SidebarMessage {
-    AddConnection,
     SelectConnection(String),
     ItemMessage(String, connection_item::ItemMessage),
 }
 
 pub fn view<'a>(items: &'a [ConnectionItem]) -> Element<'a, SidebarMessage> {
-    let header = container(
-        row![
-            text("Connections").size(13),
-            iced::widget::Space::new().width(Length::Fill),
-            button(row![
-                svg(svg::Handle::from_memory(include_bytes!(
-                    "../resources/plus.svg"
-                )))
-                .width(14)
-                .height(14)
-                .style(|_theme, _status| svg::Style {
-                    color: Some(iced::color!(255, 255, 255))
-                }),
-            ])
-            .on_press(SidebarMessage::AddConnection)
-            .style(iced::widget::button::primary),
-        ]
-        .align_y(iced::Alignment::Center),
-    )
-    .padding([10, 12]);
-
     let mut conn_list = Column::new().spacing(4).padding(Padding::from([0, 0]));
 
     for item in items {
@@ -61,12 +39,8 @@ pub fn view<'a>(items: &'a [ConnectionItem]) -> Element<'a, SidebarMessage> {
         );
     }
 
-    container(column![
-        header,
-        iced::widget::rule::horizontal(1),
-        scrollable(conn_list).height(Length::Fill),
-    ])
-    .width(Length::Fixed(260.0))
-    .height(Length::Fill)
-    .into()
+    container(column![scrollable(conn_list).height(Length::Fill),])
+        .width(Length::Fixed(260.0))
+        .height(Length::Fill)
+        .into()
 }

@@ -1,6 +1,6 @@
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
-use iced::{Color, Element, Length, Point, Task, Theme};
+use iced::{Color, Element, Length, Point, Task, Theme, alignment};
 use iced::{Subscription, window};
 
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
@@ -8,6 +8,7 @@ use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
+use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -23,6 +24,9 @@ pub enum Message {
     ZoomOut,
     ZoomReset,
     Noop,
+    ToggleMenu,
+    CloseMenu,
+    AddConnection,
 }
 
 #[derive(Debug)]
@@ -32,6 +36,7 @@ pub struct App {
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
+    pub menu_open: bool,
 }
 
 impl Default for App {
@@ -42,6 +47,7 @@ impl Default for App {
             zoom_multiplier: 0,
             is_maximized: false,
             saved_position: None,
+            menu_open: false,
         }
     }
 }
@@ -49,10 +55,12 @@ impl Default for App {
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Sidebar(msg) => match msg {
-                SidebarMessage::AddConnection => Task::done(Message::ConnManager(
+            Message::AddConnection => {
+                Task::done(Message::CloseMenu).chain(Task::done(Message::ConnManager(
                     ConnManagerMessage::ConnectionDialogMessage(DialogMessage::OpenNew),
-                )),
+                )))
+            }
+            Message::Sidebar(msg) => match msg {
                 SidebarMessage::SelectConnection(id) => Task::done(Message::ConnManager(
                     ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::Select),
                 )),
@@ -109,6 +117,14 @@ impl App {
             }
             Message::ToggleSidebar => Task::none(),
             Message::Noop => Task::none(),
+            Message::ToggleMenu => {
+                self.menu_open = !self.menu_open;
+                Task::none()
+            }
+            Message::CloseMenu => {
+                self.menu_open = false;
+                Task::none()
+            }
         }
     }
 
@@ -167,8 +183,31 @@ impl App {
     }
 
     fn view_title_bar(&self) -> Element<'_, Message> {
-        let title = container(text("pgeru").size(13).align_x(text::Alignment::Left))
-            .padding(iced::padding::left(8));
+        let hamburger_btn = button(
+            svg(svg::Handle::from_memory(include_bytes!(
+                "resources/menu.svg"
+            )))
+            .height(16)
+            .width(16)
+            .style(|_theme, _status| svg::Style {
+                color: Some(Color::WHITE),
+            }),
+        )
+        .on_press(Message::ToggleMenu)
+        .style(|_theme, _status| button::Style {
+            background: Some(iced::Background::Color(Color::TRANSPARENT)),
+            ..Default::default()
+        });
+
+        let title = text("pgeru").size(13).align_x(text::Alignment::Left);
+        let menu_content = self.menu_content_view();
+
+        let dropdown = iced_aw::DropDown::new(hamburger_btn, menu_content, self.menu_open)
+            .on_dismiss(Message::CloseMenu)
+            .offset(iced_aw::drop_down::Offset::new(0.0, 25.0))
+            .width(250)
+            .alignment(drop_down::Alignment::BottomStart);
+
         let close_button = button(
             svg(svg::Handle::from_memory(include_bytes!("resources/x.svg")))
                 .height(16)
@@ -182,9 +221,10 @@ impl App {
             background: Some(iced::Background::Color(Color::TRANSPARENT)),
             ..Default::default()
         });
-        let draggable_area = mouse_area(row![title, horizontal()])
-            .on_press(Message::Drag)
-            .on_double_click(Message::ToggleMaximize);
+        let draggable_area =
+            mouse_area(row![dropdown, title, horizontal()].align_y(alignment::Vertical::Center))
+                .on_press(Message::Drag)
+                .on_double_click(Message::ToggleMaximize);
 
         container(column![
             row![draggable_area, close_button]
@@ -216,5 +256,37 @@ impl App {
             }
             _ => None,
         })
+    }
+
+    fn menu_content_view(&self) -> Element<'_, Message> {
+        let menu_content = container(
+            column![
+                button(text("Add Connection").size(13))
+                    .on_press(Message::AddConnection)
+                    .padding([6, 12])
+                    .width(Length::Fill)
+                    .style(button::subtle),
+                button(text("Settings").size(13))
+                    .on_press(Message::CloseMenu)
+                    .padding([6, 12])
+                    .width(Length::Fill)
+                    .style(button::subtle),
+                button(text("About").size(13))
+                    .on_press(Message::CloseMenu)
+                    .padding([6, 12])
+                    .width(Length::Fill)
+                    .style(button::subtle),
+            ]
+            .spacing(0),
+        )
+        .width(150)
+        .style(|theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.extended_palette().background.strong.color,
+            )),
+            border: iced::Border::default().rounded(4),
+            ..Default::default()
+        });
+        menu_content.into()
     }
 }
