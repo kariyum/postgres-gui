@@ -43,7 +43,7 @@ fn main() -> iced::Result {
             ..Default::default()
         })
         .centered()
-        .scale_factor(|state| 1.0 + (state.zoom_multiplier as f32) * 0.125)
+        .scale_factor(|state| 1.5 + (state.zoom_multiplier as f32) * 0.125)
         .antialiasing(true)
         .subscription(|app| app.key_press_handler())
         .run()

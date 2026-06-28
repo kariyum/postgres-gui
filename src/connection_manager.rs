@@ -49,11 +49,9 @@ impl ConnectionManager {
                 self.handle_dialog_message(msg, dialog)
             }
 
-            ConnManagerMessage::ConnectionSaved(Ok(())) => {
-                Task::done(ConnManagerMessage::ConnectionDialogMessage(
-                    DialogMessage::DialogClose,
-                ))
-            }
+            ConnManagerMessage::ConnectionSaved(Ok(())) => Task::done(
+                ConnManagerMessage::ConnectionDialogMessage(DialogMessage::DialogClose),
+            ),
 
             ConnManagerMessage::ConnectionSaved(Err(e)) => {
                 eprintln!("Failed to save connection: {e}");
@@ -69,11 +67,7 @@ impl ConnectionManager {
         }
     }
 
-    fn handle_item_message(
-        &mut self,
-        id: &str,
-        msg: ItemMessage,
-    ) -> Task<ConnManagerMessage> {
+    fn handle_item_message(&mut self, id: &str, msg: ItemMessage) -> Task<ConnManagerMessage> {
         let task = self.delegate_to_item(id, msg.clone());
 
         match msg {
@@ -125,20 +119,30 @@ impl ConnectionManager {
     ) -> Task<ConnManagerMessage> {
         let (sql, pool) = match self.items.iter().find(|i| i.cfg.id == id) {
             Some(item) => (item.editor.text(), item.pool.clone()),
-            None => return Task::none(),
+            None => {
+                return Task::done(ConnManagerMessage::ConnectionItemMessage(
+                    id.to_string(),
+                    ItemMessage::QueryResult(Err("Connection item deleted?".to_string())),
+                ));
+            }
         };
         let pool = match pool {
             Some(p) => p,
-            None => return Task::none(),
+            None => {
+                return Task::done(ConnManagerMessage::ConnectionItemMessage(
+                    id.to_string(),
+                    ItemMessage::QueryResult(Err(
+                        "Did not find connections to run the query".to_string()
+                    )),
+                ));
+            }
         };
         let id = id.to_string();
         Task::batch([
             task,
             Task::perform(
                 async move { db::execute_query(&pool, &sql).await },
-                move |r| {
-                    ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::QueryResult(r))
-                },
+                move |r| ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::QueryResult(r)),
             ),
         ])
     }
@@ -234,11 +238,7 @@ impl ConnectionManager {
         }
     }
 
-    fn delegate_to_item(
-        &mut self,
-        id: &str,
-        msg: ItemMessage,
-    ) -> Task<ConnManagerMessage> {
+    fn delegate_to_item(&mut self, id: &str, msg: ItemMessage) -> Task<ConnManagerMessage> {
         let id = id.to_string();
         if let Some(item) = self.items.iter_mut().find(|i| i.cfg.id == id) {
             item.update(msg)

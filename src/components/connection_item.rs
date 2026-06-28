@@ -306,7 +306,6 @@ impl ConnectionItem {
         let mut col = Column::new();
         col = col.push(container(wrapped));
 
-        // Connection status message
         if self.connection_status != ConnectionStatus::Disconnected {
             col = col.push(
                 container(
