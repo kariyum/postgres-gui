@@ -379,6 +379,7 @@ impl ConnectionItem {
         let editor = container(
             text_editor(&self.editor)
                 .on_action(ItemMessage::EditorAction)
+                .highlight("sql", iced::highlighter::Theme::Base16Eighties)
                 .height(Length::FillPortion(1))
                 .font(iced::Font::MONOSPACE)
                 .size(14)
