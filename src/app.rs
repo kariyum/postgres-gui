@@ -1,6 +1,6 @@
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
-use iced::{Color, Element, Length, Point, Task, Theme, alignment};
+use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, window};
 
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
@@ -19,7 +19,6 @@ pub enum Message {
     ToggleMaximize,
     PositionSaved(Option<Point>),
     RestorePosition,
-    ToggleSidebar,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -115,7 +114,6 @@ impl App {
                     Task::none()
                 }
             }
-            Message::ToggleSidebar => Task::none(),
             Message::Noop => Task::none(),
             Message::ToggleMenu => {
                 self.menu_open = !self.menu_open;
@@ -265,17 +263,26 @@ impl App {
                     .on_press(Message::AddConnection)
                     .padding([6, 12])
                     .width(Length::Fill)
-                    .style(button::subtle),
+                    .style(|_theme, _status| button::Style {
+                        border: border::rounded(0.0),
+                        ..button::subtle(_theme, _status)
+                    }),
                 button(text("Settings").size(13))
                     .on_press(Message::CloseMenu)
                     .padding([6, 12])
                     .width(Length::Fill)
-                    .style(button::subtle),
+                    .style(|_theme, _status| button::Style {
+                        border: border::rounded(0.0),
+                        ..button::subtle(_theme, _status)
+                    }),
                 button(text("About").size(13))
                     .on_press(Message::CloseMenu)
                     .padding([6, 12])
                     .width(Length::Fill)
-                    .style(button::subtle),
+                    .style(|_theme, _status| button::Style {
+                        border: border::rounded(0.0),
+                        ..button::subtle(_theme, _status)
+                    }),
             ]
             .spacing(0),
         )
