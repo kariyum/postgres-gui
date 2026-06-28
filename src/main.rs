@@ -45,6 +45,7 @@ fn main() -> iced::Result {
             iced::Subscription::batch([
                 app.key_press_handler(),
                 app.save_subscription(),
+                app.window_event_subscription(),
             ])
         })
         .run()

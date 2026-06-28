@@ -31,6 +31,8 @@ pub enum Message {
     ToggleMenu,
     CloseMenu,
     AddConnection,
+    WindowResized(window::Id),
+    MaximizedQueried(bool),
 }
 
 #[derive(Debug)]
@@ -82,9 +84,9 @@ impl App {
 
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
-                Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionsLoaded(config.connections),
-                ))
+                Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
+                    config.connections,
+                )))
             }
             Message::SavePending => {
                 if self.pending_save {
@@ -136,11 +138,8 @@ impl App {
                 window::latest().and_then(window::toggle_maximize)
             }
             Message::RestorePosition => {
-                if let Some(pos) = self.saved_position.take() {
-                    window::latest().and_then(move |id| window::move_to(id, pos))
-                } else {
-                    Task::none()
-                }
+                self.saved_position.take();
+                Task::none()
             }
             Message::Noop => Task::none(),
             Message::ToggleMenu => {
@@ -149,6 +148,11 @@ impl App {
             }
             Message::CloseMenu => {
                 self.menu_open = false;
+                Task::none()
+            }
+            Message::WindowResized(id) => window::is_maximized(id).map(Message::MaximizedQueried),
+            Message::MaximizedQueried(maximized) => {
+                self.is_maximized = maximized;
                 Task::none()
             }
         }
@@ -181,6 +185,10 @@ impl App {
         } else {
             Subscription::none()
         }
+    }
+
+    pub fn window_event_subscription(&self) -> Subscription<Message> {
+        window::resize_events().map(|(id, _size)| Message::WindowResized(id))
     }
 
     fn resize_handle(
@@ -229,88 +237,91 @@ impl App {
             layout.into()
         };
 
-        let h = Length::Fixed(6.0);
-
-        iced::widget::stack![
-            content,
-            container(Self::resize_handle(
-                window::Direction::North,
-                mouse::Interaction::ResizingVertically,
-                Length::Fill,
-                h,
-            ))
-            .width(Length::Fill)
-            .height(h)
-            .align_y(iced::Alignment::Start),
-            container(Self::resize_handle(
-                window::Direction::South,
-                mouse::Interaction::ResizingVertically,
-                Length::Fill,
-                h,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_y(iced::Alignment::End),
-            container(Self::resize_handle(
-                window::Direction::West,
-                mouse::Interaction::ResizingHorizontally,
-                h,
-                Length::Fill,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Start),
-            container(Self::resize_handle(
-                window::Direction::East,
-                mouse::Interaction::ResizingHorizontally,
-                h,
-                Length::Fill,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::End),
-            container(Self::resize_handle(
-                window::Direction::NorthWest,
-                mouse::Interaction::ResizingDiagonallyDown,
-                h,
-                h,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Start)
-            .align_y(iced::Alignment::Start),
-            container(Self::resize_handle(
-                window::Direction::NorthEast,
-                mouse::Interaction::ResizingDiagonallyUp,
-                h,
-                h,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::End)
-            .align_y(iced::Alignment::Start),
-            container(Self::resize_handle(
-                window::Direction::SouthWest,
-                mouse::Interaction::ResizingDiagonallyUp,
-                h,
-                h,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Start)
-            .align_y(iced::Alignment::End),
-            container(Self::resize_handle(
-                window::Direction::SouthEast,
-                mouse::Interaction::ResizingDiagonallyDown,
-                h,
-                h,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::End)
-            .align_y(iced::Alignment::End),
-        ]
-        .into()
+        if self.is_maximized {
+            content.into()
+        } else {
+            let h = Length::Fixed(6.0);
+            iced::widget::stack![
+                content,
+                container(Self::resize_handle(
+                    window::Direction::North,
+                    mouse::Interaction::ResizingVertically,
+                    Length::Fill,
+                    h,
+                ))
+                .width(Length::Fill)
+                .height(h)
+                .align_y(iced::Alignment::Start),
+                container(Self::resize_handle(
+                    window::Direction::South,
+                    mouse::Interaction::ResizingVertically,
+                    Length::Fill,
+                    h,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::End),
+                container(Self::resize_handle(
+                    window::Direction::West,
+                    mouse::Interaction::ResizingHorizontally,
+                    h,
+                    Length::Fill,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Start),
+                container(Self::resize_handle(
+                    window::Direction::East,
+                    mouse::Interaction::ResizingHorizontally,
+                    h,
+                    Length::Fill,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::End),
+                container(Self::resize_handle(
+                    window::Direction::NorthWest,
+                    mouse::Interaction::ResizingDiagonallyDown,
+                    h,
+                    h,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Start)
+                .align_y(iced::Alignment::Start),
+                container(Self::resize_handle(
+                    window::Direction::NorthEast,
+                    mouse::Interaction::ResizingDiagonallyUp,
+                    h,
+                    h,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::End)
+                .align_y(iced::Alignment::Start),
+                container(Self::resize_handle(
+                    window::Direction::SouthWest,
+                    mouse::Interaction::ResizingDiagonallyUp,
+                    h,
+                    h,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Start)
+                .align_y(iced::Alignment::End),
+                container(Self::resize_handle(
+                    window::Direction::SouthEast,
+                    mouse::Interaction::ResizingDiagonallyDown,
+                    h,
+                    h,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::End)
+                .align_y(iced::Alignment::End),
+            ]
+            .into()
+        }
     }
 
     fn view_main(&self) -> Element<'_, Message> {
