@@ -2,53 +2,56 @@ use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::core::connection_config::ConnectionConfig;
 
-/// Returns the configuration file path: ~/.config/pgeru/connections.json
-/// On Windows, it resolves to AppData/Roaming or falls back to user profile's .config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    pub connections: Vec<ConnectionConfig>,
+    #[serde(default)]
+    pub zoom_multiplier: u8,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            connections: Vec::new(),
+            zoom_multiplier: 0,
+        }
+    }
+}
+
 pub fn config_path() -> Option<PathBuf> {
     let home = std::env::var("USERPROFILE")
         .ok()
         .or_else(|| std::env::var("HOME").ok())
         .map(PathBuf::from);
-
-    if let Some(home_path) = home {
-        Some(
-            home_path
-                .join(".config")
-                .join("pgeru")
-                .join("connections.json"),
-        )
-    } else {
-        None
-    }
+    home.map(|h| h.join(".config").join("pgeru").join("connections.json"))
 }
 
-pub fn load_connections() -> Vec<ConnectionConfig> {
+pub fn load_config() -> AppConfig {
     if let Some(path) = config_path() {
         if path.exists() {
             if let Ok(file) = File::open(&path) {
                 let reader = BufReader::new(file);
-                if let Ok(conns) = serde_json::from_reader(reader) {
-                    return conns;
+                if let Ok(config) = serde_json::from_reader(reader) {
+                    return config;
                 }
             }
         }
     }
-    Vec::new()
+    AppConfig::default()
 }
 
-pub fn save_connections(conns: &[ConnectionConfig]) -> Result<(), String> {
-    if let Some(path) = config_path() {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {e}"))?;
-        }
-        let file = File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, conns)
-            .map_err(|e| format!("Failed to serialize connections: {e}"))?;
-        Ok(())
-    } else {
-        Err("Could not determine home directory".to_string())
+pub fn save_config(config: &AppConfig) -> Result<(), String> {
+    let path = config_path().ok_or("Could not determine home directory")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {e}"))?;
     }
+    let file = File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
+    let writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(writer, config)
+        .map_err(|e| format!("Failed to serialize config: {e}"))?;
+    Ok(())
 }

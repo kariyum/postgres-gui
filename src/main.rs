@@ -18,15 +18,11 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
     let app = app::App::default();
     let task = iced::Task::perform(
         async {
-            tokio::task::spawn_blocking(|| crate::db_config::load_connections())
+            tokio::task::spawn_blocking(|| crate::db_config::load_config())
                 .await
                 .unwrap_or_default()
         },
-        |configs| {
-            app::Message::ConnManager(
-                crate::connection_manager::ConnManagerMessage::ConnectionsLoaded(configs),
-            )
-        },
+        |config| app::Message::ConfigLoaded(config),
     );
     (app, task)
 }
@@ -45,6 +41,11 @@ fn main() -> iced::Result {
         .centered()
         .scale_factor(|state| 1.5 + (state.zoom_multiplier as f32) * 0.125)
         .antialiasing(true)
-        .subscription(|app| app.key_press_handler())
+        .subscription(|app| {
+            iced::Subscription::batch([
+                app.key_press_handler(),
+                app.save_subscription(),
+            ])
+        })
         .run()
 }

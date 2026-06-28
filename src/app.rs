@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, alignment, border};
@@ -17,6 +19,8 @@ pub enum Message {
     Close,
     Drag,
     DragResize(window::Direction),
+    ConfigLoaded(crate::db_config::AppConfig),
+    SavePending,
     ToggleMaximize,
     PositionSaved(Option<Point>),
     RestorePosition,
@@ -37,6 +41,7 @@ pub struct App {
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
     pub menu_open: bool,
+    pub pending_save: bool,
 }
 
 impl Default for App {
@@ -48,6 +53,7 @@ impl Default for App {
             is_maximized: false,
             saved_position: None,
             menu_open: false,
+            pending_save: false,
         }
     }
 }
@@ -74,18 +80,36 @@ impl App {
                 task.map(Message::ConnManager)
             }
 
+            Message::ConfigLoaded(config) => {
+                self.zoom_multiplier = config.zoom_multiplier;
+                Task::done(Message::ConnManager(
+                    ConnManagerMessage::ConnectionsLoaded(config.connections),
+                ))
+            }
+            Message::SavePending => {
+                if self.pending_save {
+                    self.pending_save = false;
+                    self.save_config()
+                } else {
+                    Task::none()
+                }
+            }
+
             Message::ZoomIn => {
                 self.zoom_multiplier += 1;
+                self.pending_save = true;
                 Task::none()
             }
             Message::ZoomOut => {
                 if self.zoom_multiplier > 0 {
                     self.zoom_multiplier -= 1;
                 }
+                self.pending_save = true;
                 Task::none()
             }
             Message::ZoomReset => {
                 self.zoom_multiplier = 0;
+                self.pending_save = true;
                 Task::none()
             }
 
@@ -127,6 +151,35 @@ impl App {
                 self.menu_open = false;
                 Task::none()
             }
+        }
+    }
+
+    fn save_config(&self) -> Task<Message> {
+        let config = crate::db_config::AppConfig {
+            connections: self.manager.items.iter().map(|i| i.cfg.clone()).collect(),
+            zoom_multiplier: self.zoom_multiplier,
+        };
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || crate::db_config::save_config(&config))
+                    .await
+                    .unwrap_or(Err("Background task failed".to_string()))
+            },
+            |result| match result {
+                Ok(()) => Message::Noop,
+                Err(e) => {
+                    eprintln!("Failed to save config: {e}");
+                    Message::Noop
+                }
+            },
+        )
+    }
+
+    pub fn save_subscription(&self) -> Subscription<Message> {
+        if self.pending_save {
+            iced::time::every(Duration::from_millis(500)).map(|_| Message::SavePending)
+        } else {
+            Subscription::none()
         }
     }
 

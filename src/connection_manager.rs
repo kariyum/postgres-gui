@@ -253,9 +253,13 @@ pub fn persist_connections(items: &[ConnectionItem]) -> Task<ConnManagerMessage>
     let configs: Vec<ConnectionConfig> = items.iter().map(|i| i.cfg.clone()).collect();
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || crate::db_config::save_connections(&configs))
-                .await
-                .unwrap_or(Err("Background task failed".to_string()))
+            tokio::task::spawn_blocking(move || {
+                let mut config = crate::db_config::load_config();
+                config.connections = configs;
+                crate::db_config::save_config(&config)
+            })
+            .await
+            .unwrap_or(Err("Background task failed".to_string()))
         },
         ConnManagerMessage::ConnectionSaved,
     )
