@@ -1,7 +1,7 @@
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, alignment, border};
-use iced::{Subscription, window};
+use iced::{Subscription, mouse, window};
 
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
@@ -16,6 +16,7 @@ pub enum Message {
     ConnManager(ConnManagerMessage),
     Close,
     Drag,
+    DragResize(window::Direction),
     ToggleMaximize,
     PositionSaved(Option<Point>),
     RestorePosition,
@@ -90,6 +91,9 @@ impl App {
 
             Message::Close => iced::exit(),
             Message::Drag => window::latest().and_then(window::drag),
+            Message::DragResize(direction) => {
+                window::latest().and_then(move |id| window::drag_resize(id, direction))
+            }
             Message::ToggleMaximize => {
                 if self.is_maximized {
                     self.is_maximized = false;
@@ -126,6 +130,18 @@ impl App {
         }
     }
 
+    fn resize_handle(
+        direction: window::Direction,
+        interaction: mouse::Interaction,
+        width: Length,
+        height: Length,
+    ) -> Element<'static, Message> {
+        mouse_area(container("").width(width).height(height))
+            .on_press(Message::DragResize(direction))
+            .interaction(interaction)
+            .into()
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         let main = self.view_main();
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
@@ -140,7 +156,7 @@ impl App {
                 .border(iced::Border::default().rounded(12))
         });
 
-        if let Some(dialog) = self.dialog.view() {
+        let content: Element<'_, Message> = if let Some(dialog) = self.dialog.view() {
             iced::widget::stack![
                 layout,
                 container(dialog.map(|msg| {
@@ -158,7 +174,90 @@ impl App {
             .into()
         } else {
             layout.into()
-        }
+        };
+
+        let h = Length::Fixed(6.0);
+
+        iced::widget::stack![
+            content,
+            container(Self::resize_handle(
+                window::Direction::North,
+                mouse::Interaction::ResizingVertically,
+                Length::Fill,
+                h,
+            ))
+            .width(Length::Fill)
+            .height(h)
+            .align_y(iced::Alignment::Start),
+            container(Self::resize_handle(
+                window::Direction::South,
+                mouse::Interaction::ResizingVertically,
+                Length::Fill,
+                h,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_y(iced::Alignment::End),
+            container(Self::resize_handle(
+                window::Direction::West,
+                mouse::Interaction::ResizingHorizontally,
+                h,
+                Length::Fill,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Start),
+            container(Self::resize_handle(
+                window::Direction::East,
+                mouse::Interaction::ResizingHorizontally,
+                h,
+                Length::Fill,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::End),
+            container(Self::resize_handle(
+                window::Direction::NorthWest,
+                mouse::Interaction::ResizingDiagonallyDown,
+                h,
+                h,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Start)
+            .align_y(iced::Alignment::Start),
+            container(Self::resize_handle(
+                window::Direction::NorthEast,
+                mouse::Interaction::ResizingDiagonallyUp,
+                h,
+                h,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::End)
+            .align_y(iced::Alignment::Start),
+            container(Self::resize_handle(
+                window::Direction::SouthWest,
+                mouse::Interaction::ResizingDiagonallyUp,
+                h,
+                h,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Start)
+            .align_y(iced::Alignment::End),
+            container(Self::resize_handle(
+                window::Direction::SouthEast,
+                mouse::Interaction::ResizingDiagonallyDown,
+                h,
+                h,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::End)
+            .align_y(iced::Alignment::End),
+        ]
+        .into()
     }
 
     fn view_main(&self) -> Element<'_, Message> {
