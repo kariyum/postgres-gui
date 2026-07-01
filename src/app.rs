@@ -5,6 +5,7 @@ use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 
+use crate::ai_config::AiConfig;
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
@@ -33,12 +34,14 @@ pub enum Message {
     AddConnection,
     WindowResized(window::Id),
     MaximizedQueried(bool),
+    TestAi(Result<Vec<String>, String>),
 }
 
 #[derive(Debug)]
 pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
+    pub ai_config: AiConfig,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
@@ -51,6 +54,7 @@ impl Default for App {
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
+            ai_config: AiConfig::default(),
             zoom_multiplier: 0,
             is_maximized: false,
             saved_position: None,
@@ -84,9 +88,17 @@ impl App {
 
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
-                Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
-                    config.connections,
-                )))
+                self.ai_config = config.ai;
+                let test_config = self.ai_config.clone();
+                Task::batch([
+                    Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
+                        config.connections,
+                    ))),
+                    Task::perform(
+                        async move { crate::ai_client::list_models(&test_config).await },
+                        Message::TestAi,
+                    ),
+                ])
             }
             Message::SavePending => {
                 if self.pending_save {
@@ -155,6 +167,16 @@ impl App {
                 self.is_maximized = maximized;
                 Task::none()
             }
+            Message::TestAi(result) => match result {
+                Ok(models) => {
+                    eprintln!("[AI] Available models: {models:?}");
+                    Task::none()
+                }
+                Err(e) => {
+                    eprintln!("[AI] Failed to list models: {e}");
+                    Task::none()
+                }
+            },
         }
     }
 
@@ -162,6 +184,7 @@ impl App {
         let config = crate::db_config::AppConfig {
             connections: self.manager.items.iter().map(|i| i.cfg.clone()).collect(),
             zoom_multiplier: self.zoom_multiplier,
+            ai: self.ai_config.clone(),
         };
         Task::perform(
             async move {
