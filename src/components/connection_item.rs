@@ -40,7 +40,6 @@ pub struct ConnectionItem {
     pub schema_tree: SchemaTree,
     pub schema_loading: bool,
     pub connection_status: ConnectionStatus,
-    pub actions_open: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,6 @@ impl ConnectionItem {
             schema_tree: SchemaTree::new(Vec::new()),
             schema_loading: false,
             connection_status: ConnectionStatus::Disconnected,
-            actions_open: false,
             cfg,
         }
     }
@@ -123,7 +121,7 @@ impl ConnectionItem {
 
             ItemMessage::SchemaTreeMessage(msg) => match msg {
                 TreeMessage::SelectTable(schema, table) => {
-                    let sql = format!("SELECT * FROM \"{schema}\".\"{table}\" LIMIT 100;");
+                    let sql = format!("SELECT * FROM {schema}.{table} LIMIT 100;");
                     self.editor = text_editor::Content::with_text(&sql);
                     self.schema_tree
                         .update(TreeMessage::SelectTable(schema, table))
@@ -143,7 +141,6 @@ impl ConnectionItem {
                 Task::none()
             }
 
-            // ── Query editor and results ─────────────────────────────────
             ItemMessage::EditorAction(action) => {
                 self.editor.perform(action);
                 Task::none()
@@ -336,28 +333,16 @@ impl ConnectionItem {
 
     pub fn view_editor(&self) -> Element<'_, ItemMessage> {
         let run_btn = if self.running {
-            button(
-                row![text("⏳").size(13), text(" Running…").size(13),]
-                    .align_y(iced::Alignment::Center),
-            )
-            .padding([6, 16])
-            .style(iced::widget::button::secondary)
+            button(text(" Running…").size(13)).style(iced::widget::button::secondary)
         } else {
             button(
-                row![
-                    svg(svg::Handle::from_memory(include_bytes!(
-                        "../resources/play.svg"
-                    )))
-                    .height(12)
-                    .width(12),
-                    text("Run").size(13)
-                ]
-                .spacing(6)
-                .align_y(iced::Alignment::Center),
+                svg(svg::Handle::from_memory(include_bytes!(
+                    "../resources/play.svg"
+                )))
+                .height(12)
+                .width(12),
             )
             .on_press(ItemMessage::RunQuery)
-            .padding([6, 16])
-            .style(iced::widget::button::primary)
         };
 
         let conn_info = format!(
@@ -373,8 +358,7 @@ impl ConnectionItem {
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
-        )
-        .padding([6, 10]);
+        );
 
         let editor = container(
             text_editor(&self.editor)
@@ -466,7 +450,6 @@ impl ConnectionItem {
 
         let has_result = self.result.is_some();
 
-        // ── Status bar ────────────────────────────────────────────────────
         let status_bar = if let Some(ref qr) = self.result {
             let count_info = if qr.columns.is_empty() {
                 format!("{}", qr.message)

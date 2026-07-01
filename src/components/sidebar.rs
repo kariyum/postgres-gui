@@ -23,16 +23,9 @@ pub fn view<'a>(items: &'a [ConnectionItem]) -> Element<'a, SidebarMessage> {
     if items.is_empty() {
         conn_list = conn_list.push(
             container(
-                column![
-                    text("No connections yet.")
-                        .size(13)
-                        .color(theme::TEXT_MUTED),
-                    text("Click + to add one.")
-                        .size(12)
-                        .color(theme::TEXT_MUTED),
-                ]
-                .spacing(4)
-                .align_x(iced::Alignment::Center),
+                text("No connections yet.")
+                    .size(13)
+                    .color(theme::TEXT_MUTED),
             )
             .padding([20, 12])
             .width(Length::Fill),
