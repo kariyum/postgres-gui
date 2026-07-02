@@ -6,6 +6,7 @@ use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, align
 use iced::{Subscription, mouse, window};
 
 use crate::ai_config::AiConfig;
+use crate::components::ai_settings_dialog::{AiSettingsDialog, AiSettingsMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
@@ -35,12 +36,15 @@ pub enum Message {
     WindowResized(window::Id),
     MaximizedQueried(bool),
     TestAi(Result<Vec<String>, String>),
+    AiSettings(AiSettingsMessage),
+    OpenAiSettings,
 }
 
 #[derive(Debug)]
 pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
+    pub ai_settings: AiSettingsDialog,
     pub ai_config: AiConfig,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
@@ -54,6 +58,7 @@ impl Default for App {
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
+            ai_settings: AiSettingsDialog::default(),
             ai_config: AiConfig::default(),
             zoom_multiplier: 0,
             is_maximized: false,
@@ -162,6 +167,12 @@ impl App {
                 self.menu_open = false;
                 Task::none()
             }
+            Message::OpenAiSettings => {
+                self.menu_open = false;
+                Task::done(Message::AiSettings(AiSettingsMessage::Open(
+                    self.ai_config.clone(),
+                )))
+            }
             Message::WindowResized(id) => window::is_maximized(id).map(Message::MaximizedQueried),
             Message::MaximizedQueried(maximized) => {
                 self.is_maximized = maximized;
@@ -177,6 +188,14 @@ impl App {
                     Task::none()
                 }
             },
+            Message::AiSettings(AiSettingsMessage::Saved(config)) => {
+                self.ai_config = config;
+                self.pending_save = true;
+                Task::none()
+            }
+            Message::AiSettings(msg) => {
+                self.ai_settings.update(msg).map(Message::AiSettings)
+            }
         }
     }
 
@@ -254,6 +273,20 @@ impl App {
                     background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
                     ..Default::default()
                 }),
+            ]
+            .into()
+        } else if let Some(dialog) = self.ai_settings.view() {
+            iced::widget::stack![
+                layout,
+                container(dialog.map(Message::AiSettings))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center)
+                    .style(|_: &Theme| iced::widget::container::Style {
+                        background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                        ..Default::default()
+                    }),
             ]
             .into()
         } else {
@@ -454,7 +487,7 @@ impl App {
                         ..button::subtle(_theme, _status)
                     }),
                 button(text("Settings").size(13))
-                    .on_press(Message::CloseMenu)
+                    .on_press(Message::OpenAiSettings)
                     .padding([6, 12])
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style {
