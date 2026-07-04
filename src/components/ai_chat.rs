@@ -1,6 +1,8 @@
 use iced::border::Radius;
 use iced::widget::space::horizontal;
-use iced::widget::{Row, button, column, container, row, rule, text, text_editor, text_input};
+use iced::widget::{
+    Row, button, column, container, row, rule, scrollable, text, text_editor, text_input,
+};
 use iced::{Background, Border, Color, Element, Length, Task, Theme};
 use iced_aw::widget::labeled_frame::Catalog;
 
@@ -47,9 +49,10 @@ impl AIChat {
             text_editor(&self.input)
                 .placeholder("How many active users do I have?")
                 .on_action(AIChatMessage::EditorAction)
-                .height(80)
                 .style(|_theme: &Theme, _status| text_editor::Style {
-                    background: Background::Color(_theme.extended_palette().background.weakest.color),
+                    background: Background::Color(
+                        _theme.extended_palette().background.weakest.color
+                    ),
                     border: Border {
                         color: Color::TRANSPARENT,
                         radius: Radius::new(0),
@@ -57,6 +60,8 @@ impl AIChat {
                     },
                     ..text_editor::default(_theme, _status)
                 })
+                .min_height(80)
+                .max_height(200)
         ];
         layout.into()
     }

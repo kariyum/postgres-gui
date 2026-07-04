@@ -248,6 +248,12 @@ impl App {
             .into()
     }
 
+    pub fn view_footer(&self) -> Element<'_, Message> {
+        container(horizontal().width(Length::Fill))
+            .height(20)
+            .into()
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         let main = self.view_main();
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
@@ -261,7 +267,9 @@ impl App {
                 main,
                 iced::widget::rule::vertical(1),
                 aichat
-            ]
+            ],
+            rule::horizontal(1.0),
+            self.view_footer()
         ])
         .style(|_theme: &Theme| -> container::Style {
             container::Style::default()
