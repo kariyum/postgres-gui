@@ -374,9 +374,7 @@ impl ConnectionItem {
                         width: 0.0,
                         radius: iced::border::Radius::new(0),
                     },
-                    placeholder: Color::WHITE,
-                    selection: Color::WHITE,
-                    value: Color::WHITE,
+                    ..text_editor::default(_theme, _status)
                 }),
         )
         .style(|theme: &Theme| {

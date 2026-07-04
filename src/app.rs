@@ -6,6 +6,7 @@ use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, align
 use iced::{Subscription, mouse, window};
 
 use crate::ai_config::AiConfig;
+use crate::components::ai_chat::{AIChat, AIChatMessage};
 use crate::components::ai_settings_dialog::{AiSettingsDialog, AiSettingsMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
@@ -37,6 +38,7 @@ pub enum Message {
     MaximizedQueried(bool),
     TestAi(Result<Vec<String>, String>),
     AiSettings(AiSettingsMessage),
+    AIChat(AIChatMessage),
     OpenAiSettings,
 }
 
@@ -46,6 +48,7 @@ pub struct App {
     pub dialog: ConnectionDialog,
     pub ai_settings: AiSettingsDialog,
     pub ai_config: AiConfig,
+    pub ai_chat: AIChat,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
@@ -60,6 +63,7 @@ impl Default for App {
             dialog: ConnectionDialog::default(),
             ai_settings: AiSettingsDialog::default(),
             ai_config: AiConfig::default(),
+            ai_chat: AIChat::default(),
             zoom_multiplier: 0,
             is_maximized: false,
             saved_position: None,
@@ -193,9 +197,8 @@ impl App {
                 self.pending_save = true;
                 Task::none()
             }
-            Message::AiSettings(msg) => {
-                self.ai_settings.update(msg).map(Message::AiSettings)
-            }
+            Message::AiSettings(msg) => self.ai_settings.update(msg).map(Message::AiSettings),
+            Message::AIChat(msg) => self.ai_chat.update(msg),
         }
     }
 
@@ -248,10 +251,17 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let main = self.view_main();
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
+        let aichat = self.ai_chat.view().map(Message::AIChat);
 
         let layout = container(column![
             self.view_title_bar(),
-            row![sidebar, iced::widget::rule::vertical(1), main,]
+            row![
+                sidebar,
+                iced::widget::rule::vertical(1),
+                main,
+                iced::widget::rule::vertical(1),
+                aichat
+            ]
         ])
         .style(|_theme: &Theme| -> container::Style {
             container::Style::default()
