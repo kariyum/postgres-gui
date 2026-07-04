@@ -1,11 +1,14 @@
 use iced::border::Radius;
-use iced::widget::space::{horizontal, vertical};
+use iced::widget::operation::focus;
+use iced::widget::space::{self, horizontal, vertical};
 use iced::widget::{
-    Row, button, column, container, row, rule, scrollable, svg, text, text_editor, text_input,
+    Row, Space, button, column, container, row, rule, scrollable, svg, text, text_editor,
+    text_input,
 };
 use iced::{Background, Border, Color, Element, Length, Task, Theme};
 
 use crate::app::Message;
+use crate::components::ai_chat::AIChatMessage::MessageAction;
 
 #[derive(Clone, Default, Debug)]
 pub struct AIChat {
@@ -22,6 +25,26 @@ pub struct ChatMsg {
 }
 
 #[derive(Clone, Debug)]
+pub enum ChatMsgMessage {
+    Noop,
+}
+
+impl ChatMsg {
+    fn view(&self) -> Element<'_, ChatMsgMessage> {
+        container(row![
+            if let Role::User = self.role {
+                horizontal()
+            } else {
+                Space::new()
+            },
+            text(self.content.to_string())
+        ])
+        .padding([8.0, 12.0])
+        .into()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Role {
     User,
     Assistant,
@@ -33,11 +56,17 @@ pub enum AIChatMessage {
     TogglePanel,
     EditorAction(text_editor::Action),
     Send,
+    MessageAction(ChatMsgMessage),
 }
 
 impl AIChat {
     fn view_messages(&self) -> Element<'_, AIChatMessage> {
-        vertical().height(Length::Fill).into()
+        let messages_col = column(
+            self.messages
+                .iter()
+                .map(|msg| msg.view().map(AIChatMessage::MessageAction)),
+        );
+        scrollable(messages_col).height(Length::Fill).into()
     }
 
     fn view_actions(&self) -> Element<'_, AIChatMessage> {
@@ -69,6 +98,7 @@ impl AIChat {
         text_editor(&self.input)
             .placeholder("How many active users do I have?")
             .on_action(AIChatMessage::EditorAction)
+            .id("ai_editor")
             .style(|_theme: &Theme, _status| text_editor::Style {
                 background: Background::Color(_theme.extended_palette().background.weakest.color),
                 border: Border {
@@ -106,8 +136,16 @@ impl AIChat {
                 Task::none()
             }
             AIChatMessage::Send => {
-                todo!()
+                self.messages.push(ChatMsg {
+                    role: Role::User,
+                    content: self.input.text(),
+                });
+                self.input.perform(text_editor::Action::SelectAll);
+                self.input
+                    .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                focus("ai_editor")
             }
+            AIChatMessage::MessageAction(_) => Task::none(),
         }
     }
 }
