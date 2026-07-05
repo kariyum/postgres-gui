@@ -25,9 +25,7 @@ pub struct ChatMsg {
 }
 
 #[derive(Clone, Debug)]
-pub enum ChatMsgMessage {
-    Noop,
-}
+pub enum ChatMsgMessage {}
 
 impl ChatMsg {
     fn view(&self) -> Element<'_, ChatMsgMessage> {
@@ -136,13 +134,15 @@ impl AIChat {
                 Task::none()
             }
             AIChatMessage::Send => {
-                self.messages.push(ChatMsg {
-                    role: Role::User,
-                    content: self.input.text(),
-                });
-                self.input.perform(text_editor::Action::SelectAll);
-                self.input
-                    .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                if !self.input.text().is_empty() {
+                    self.messages.push(ChatMsg {
+                        role: Role::User,
+                        content: self.input.text(),
+                    });
+                    self.input.perform(text_editor::Action::SelectAll);
+                    self.input
+                        .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                }
                 focus("ai_editor")
             }
             AIChatMessage::MessageAction(_) => Task::none(),
