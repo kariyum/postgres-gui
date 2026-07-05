@@ -115,7 +115,7 @@ impl AIChat {
         let layout = column![
             container(text("AI Chat").size(14)).padding([4.0, 8.0]),
             rule::horizontal(1.0),
-            scrollable(self.view_messages()).height(Length::Fill),
+            self.view_messages(),
             rule::horizontal(1.0),
             self.view_editor(),
             self.view_actions()
