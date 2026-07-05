@@ -6,6 +6,7 @@ use iced::widget::{
     text_input,
 };
 use iced::{Background, Border, Color, Element, Length, Task, Theme};
+use serde::{Deserialize, Serialize};
 
 use crate::app::Message;
 use crate::components::ai_chat::AIChatMessage::MessageAction;
@@ -42,7 +43,8 @@ impl ChatMsg {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
     Assistant,

@@ -13,6 +13,7 @@ use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
+use crate::core::ai_client;
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -104,7 +105,7 @@ impl App {
                         config.connections,
                     ))),
                     Task::perform(
-                        async move { crate::ai_client::list_models(&test_config).await },
+                        async move { ai_client::list_models(&test_config).await },
                         Message::TestAi,
                     ),
                 ])
