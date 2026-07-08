@@ -1,6 +1,7 @@
 use iced::border::Radius;
 use iced::futures::{Stream, StreamExt};
 use iced::keyboard::key::{self, Named};
+use iced::widget::operation;
 use iced::widget::space::horizontal;
 use iced::widget::{
     button, column, container, markdown, row, rule, scrollable, svg, text, text_editor,
@@ -13,7 +14,7 @@ use crate::ai_config::AIConfig;
 use crate::app::Message;
 use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk};
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct AIChat {
     visible: bool,
     input: text_editor::Content,
@@ -21,6 +22,7 @@ pub struct AIChat {
     messages: Vec<ChatMsg>,
     config: AIConfig,
     stream_id: Option<Uuid>,
+    auto_scroll: bool,
 }
 
 #[derive(Debug)]
@@ -103,6 +105,21 @@ pub enum AIChatMessage {
     ChunkReceived(ChatResponseChunk),
     StreamError(String),
     StreamFinished,
+    UserScrolled(scrollable::Viewport),
+}
+
+impl Default for AIChat {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            input: text_editor::Content::default(),
+            error: None,
+            messages: Vec::new(),
+            config: AIConfig::default(),
+            stream_id: None,
+            auto_scroll: true,
+        }
+    }
 }
 
 impl AIChat {
@@ -112,7 +129,11 @@ impl AIChat {
                 .iter()
                 .map(|msg| msg.view().map(AIChatMessage::MessageAction)),
         );
-        scrollable(messages_col).height(Length::Fill).into()
+        scrollable(messages_col)
+            .id("chat_messages")
+            .on_scroll(AIChatMessage::UserScrolled)
+            .height(Length::Fill)
+            .into()
     }
 
     fn actions_view(&self) -> Element<'_, AIChatMessage> {
@@ -252,7 +273,11 @@ impl AIChat {
                     self.stream_id = None;
                 }
 
-                Task::none()
+                if self.auto_scroll {
+                    operation::snap_to_end(iced::widget::Id::new("chat_messages"))
+                } else {
+                    Task::none()
+                }
             }
             AIChatMessage::StreamError(err) => {
                 self.error = Some(err);
@@ -261,6 +286,14 @@ impl AIChat {
             }
             AIChatMessage::StreamFinished => {
                 self.stream_id = None;
+                Task::none()
+            }
+            AIChatMessage::UserScrolled(viewport) => {
+                let offset = viewport.absolute_offset();
+                let content = viewport.content_bounds();
+                let visible = viewport.bounds();
+                let distance_from_bottom = content.height - visible.height - offset.y;
+                self.auto_scroll = distance_from_bottom < 50.0;
                 Task::none()
             }
         }
