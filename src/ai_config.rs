@@ -5,14 +5,14 @@ pub const SYSTEM_PROMPT: &str = "You are a PostgreSQL expert assistant. \
     and analyze query results.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiConfig {
+pub struct AIConfig {
     pub endpoint: String,
     #[serde(default)]
     pub api_key: Option<String>,
     pub model: String,
 }
 
-impl Default for AiConfig {
+impl Default for AIConfig {
     fn default() -> Self {
         Self {
             endpoint: "https://ollama.com".into(),

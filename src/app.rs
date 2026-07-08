@@ -5,7 +5,7 @@ use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 
-use crate::ai_config::AiConfig;
+use crate::ai_config::AIConfig;
 use crate::components::ai_chat::{AIChat, AIChatMessage};
 use crate::components::ai_settings_dialog::{AiSettingsDialog, AiSettingsMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
@@ -48,7 +48,7 @@ pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
     pub ai_settings: AiSettingsDialog,
-    pub ai_config: AiConfig,
+    pub ai_config: AIConfig,
     pub ai_chat: AIChat,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
@@ -63,7 +63,7 @@ impl Default for App {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
             ai_settings: AiSettingsDialog::default(),
-            ai_config: AiConfig::default(),
+            ai_config: AIConfig::default(),
             ai_chat: AIChat::default(),
             zoom_multiplier: 0,
             is_maximized: false,
@@ -98,7 +98,8 @@ impl App {
 
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
-                self.ai_config = config.ai;
+                self.ai_config = config.ai.clone();
+                self.ai_chat.set_config(config.ai);
                 let test_config = self.ai_config.clone();
                 Task::batch([
                     Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
@@ -194,7 +195,8 @@ impl App {
                 }
             },
             Message::AiSettings(AiSettingsMessage::Saved(config)) => {
-                self.ai_config = config;
+                self.ai_config = config.clone();
+                self.ai_chat.set_config(config);
                 self.pending_save = true;
                 Task::none()
             }
@@ -534,4 +536,5 @@ impl App {
         });
         menu_content.into()
     }
+
 }

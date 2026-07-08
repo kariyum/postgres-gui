@@ -1,15 +1,14 @@
 use iced::border::Radius;
-use iced::widget::operation::focus;
-use iced::widget::space::{self, horizontal, vertical};
-use iced::widget::{
-    Row, Space, button, column, container, row, rule, scrollable, svg, text, text_editor,
-    text_input,
-};
+use iced::futures::{Stream, StreamExt};
+use iced::widget::space::horizontal;
+use iced::widget::{button, column, container, row, rule, scrollable, svg, text, text_editor};
 use iced::{Background, Border, Color, Element, Length, Task, Theme};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
+use crate::ai_config::AIConfig;
 use crate::app::Message;
-use crate::components::ai_chat::AIChatMessage::MessageAction;
+use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk};
 
 #[derive(Clone, Default, Debug)]
 pub struct AIChat {
@@ -17,12 +16,23 @@ pub struct AIChat {
     input: text_editor::Content,
     error: Option<String>,
     messages: Vec<ChatMsg>,
+    config: AIConfig,
+    stream_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ChatMsg {
     pub role: Role,
     pub content: String,
+}
+
+impl Into<ChatMessage> for ChatMsg {
+    fn into(self) -> ChatMessage {
+        ChatMessage {
+            content: self.content,
+            role: self.role,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -34,7 +44,7 @@ impl ChatMsg {
             if let Role::User = self.role {
                 horizontal()
             } else {
-                Space::new()
+                iced::widget::Space::new()
             },
             text(self.content.to_string())
         ])
@@ -57,6 +67,9 @@ pub enum AIChatMessage {
     EditorAction(text_editor::Action),
     Send,
     MessageAction(ChatMsgMessage),
+    ChunkReceived(ChatResponseChunk),
+    StreamError(String),
+    StreamFinished,
 }
 
 impl AIChat {
@@ -136,7 +149,7 @@ impl AIChat {
                 Task::none()
             }
             AIChatMessage::Send => {
-                if !self.input.text().is_empty() {
+                if !self.input.text().is_empty() && self.stream_id.is_none() {
                     self.messages.push(ChatMsg {
                         role: Role::User,
                         content: self.input.text(),
@@ -144,10 +157,78 @@ impl AIChat {
                     self.input.perform(text_editor::Action::SelectAll);
                     self.input
                         .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+
+                    let config = self.config.clone();
+                    let messages: Vec<ChatMessage> =
+                        self.messages.iter().map(|m| m.clone().into()).collect();
+
+                    self.stream_id = Some(Uuid::new_v4());
+
+                    Task::future(ai_client::prompt(config, messages)).then(|request_result| match request_result {
+                        Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                            let message = match chat_response_chunk {
+                                Ok(chunk) => {
+                                    if chunk.done {
+                                        Message::AIChat(AIChatMessage::StreamFinished)
+                                    } else {
+                                        Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                                    }
+                                }
+                                Err(err) => {
+                                    Message::AIChat(AIChatMessage::StreamError(err.to_string()))
+                                }
+                            };
+                            message
+                        }),
+                        Err(err) => {
+                            Task::done(Message::AIChat(AIChatMessage::StreamError(err.to_string())))
+                        }
+                    })
+                } else {
+                    Task::none()
                 }
-                focus("ai_editor")
             }
             AIChatMessage::MessageAction(_) => Task::none(),
+            AIChatMessage::ChunkReceived(chunk) => {
+                if let Some(last) = self.messages.last_mut() {
+                    if let Role::Assistant = last.role {
+                        last.content.push_str(&chunk.message.content);
+                    } else {
+                        self.messages.push(ChatMsg {
+                            role: Role::Assistant,
+                            content: chunk.message.content,
+                        });
+                    }
+                } else {
+                    self.messages.push(ChatMsg {
+                        role: Role::Assistant,
+                        content: chunk.message.content,
+                    });
+                }
+
+                if chunk.done {
+                    self.stream_id = None;
+                }
+
+                Task::none()
+            }
+            AIChatMessage::StreamError(err) => {
+                self.error = Some(err);
+                self.stream_id = None;
+                Task::none()
+            }
+            AIChatMessage::StreamFinished => {
+                self.stream_id = None;
+                Task::none()
+            }
         }
+    }
+
+    pub fn streaming(&self) -> bool {
+        self.stream_id.is_some()
+    }
+
+    pub fn set_config(&mut self, config: AIConfig) {
+        self.config = config;
     }
 }

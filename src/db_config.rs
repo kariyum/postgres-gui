@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai_config::AiConfig;
+use crate::ai_config::AIConfig;
 use crate::core::connection_config::ConnectionConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,7 +13,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub zoom_multiplier: u8,
     #[serde(default)]
-    pub ai: AiConfig,
+    pub ai: AIConfig,
 }
 
 impl Default for AppConfig {
@@ -21,7 +21,7 @@ impl Default for AppConfig {
         Self {
             connections: Vec::new(),
             zoom_multiplier: 0,
-            ai: AiConfig::default(),
+            ai: AIConfig::default(),
         }
     }
 }

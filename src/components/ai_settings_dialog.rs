@@ -1,7 +1,7 @@
 use iced::widget::{button, column, container, row, text};
 use iced::{Color, Element, Length, Task, Theme};
 
-use crate::ai_config::AiConfig;
+use crate::ai_config::AIConfig;
 use crate::theme;
 use crate::ui::input_field::{InputField, InputFieldMessage};
 
@@ -14,13 +14,13 @@ pub struct AiSettingsDialog {
 
 #[derive(Debug, Clone)]
 pub enum AiSettingsMessage {
-    Open(AiConfig),
+    Open(AIConfig),
     EndpointField(InputFieldMessage),
     ApiKeyField(InputFieldMessage),
     ModelField(InputFieldMessage),
     Save,
     Close,
-    Saved(AiConfig),
+    Saved(AIConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ pub struct AiSettingsForm {
 }
 
 impl AiSettingsForm {
-    fn new(config: &AiConfig) -> Self {
+    fn new(config: &AIConfig) -> Self {
         Self {
             endpoint: InputField::default()
                 .placeholder("https://ollama.com".into())
@@ -51,9 +51,9 @@ impl AiSettingsForm {
         }
     }
 
-    fn to_config(&self) -> AiConfig {
+    fn to_config(&self) -> AIConfig {
         let api_key = self.api_key.value.trim();
-        AiConfig {
+        AIConfig {
             endpoint: self.endpoint.value.trim().to_string(),
             api_key: if api_key.is_empty() {
                 None
@@ -69,7 +69,7 @@ impl Default for AiSettingsDialog {
     fn default() -> Self {
         Self {
             visible: false,
-            form: AiSettingsForm::new(&AiConfig::default()),
+            form: AiSettingsForm::new(&AIConfig::default()),
             error: None,
         }
     }
