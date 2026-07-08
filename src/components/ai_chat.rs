@@ -47,9 +47,13 @@ impl ChatMsg {
             } else {
                 iced::widget::Space::new()
             },
-            text(self.content.to_string())
+            container(text(self.content.to_string()))
+                .style(|_theme| container::Style {
+                    background: Some(Background::Color(Color::TRANSPARENT)),
+                    ..Default::default()
+                })
+                .padding([8.0, 12.0])
         ])
-        .padding([8.0, 12.0])
         .into()
     }
 }
@@ -74,7 +78,7 @@ pub enum AIChatMessage {
 }
 
 impl AIChat {
-    fn view_messages(&self) -> Element<'_, AIChatMessage> {
+    fn messages_view(&self) -> Element<'_, AIChatMessage> {
         let messages_col = column(
             self.messages
                 .iter()
@@ -83,7 +87,7 @@ impl AIChat {
         scrollable(messages_col).height(Length::Fill).into()
     }
 
-    fn view_actions(&self) -> Element<'_, AIChatMessage> {
+    fn actions_view(&self) -> Element<'_, AIChatMessage> {
         container(row![
             horizontal(),
             button(
@@ -108,7 +112,7 @@ impl AIChat {
         .into()
     }
 
-    fn view_editor(&self) -> Element<'_, AIChatMessage> {
+    fn editor_view(&self) -> Element<'_, AIChatMessage> {
         text_editor(&self.input)
             .placeholder("How many active users do I have?")
             .on_action(AIChatMessage::EditorAction)
@@ -143,10 +147,10 @@ impl AIChat {
         let layout = column![
             container(text("AI Chat").size(14)).padding([4.0, 8.0]),
             rule::horizontal(1.0),
-            self.view_messages(),
+            self.messages_view(),
             rule::horizontal(1.0),
-            self.view_editor(),
-            self.view_actions()
+            self.editor_view(),
+            self.actions_view()
         ];
         layout.into()
     }
