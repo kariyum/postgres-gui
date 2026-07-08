@@ -1,8 +1,9 @@
 use iced::border::Radius;
 use iced::futures::{Stream, StreamExt};
+use iced::keyboard::key::{self, Named};
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, row, rule, scrollable, svg, text, text_editor};
-use iced::{Background, Border, Color, Element, Length, Task, Theme};
+use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -112,6 +113,18 @@ impl AIChat {
             .placeholder("How many active users do I have?")
             .on_action(AIChatMessage::EditorAction)
             .id("ai_editor")
+            .key_binding(|event| match (&event.key, &event.modifiers) {
+                (&keyboard::Key::Named(key::Named::Enter), &keyboard::Modifiers::SHIFT) => {
+                    text_editor::Binding::from_key_press(text_editor::KeyPress {
+                        modifiers: keyboard::Modifiers::NONE,
+                        ..event.clone()
+                    })
+                }
+                (&keyboard::Key::Named(key::Named::Enter), _) => {
+                    Some(text_editor::Binding::Custom(AIChatMessage::Send))
+                }
+                _ => text_editor::Binding::from_key_press(event),
+            })
             .style(|_theme: &Theme, _status| text_editor::Style {
                 background: Background::Color(_theme.extended_palette().background.weakest.color),
                 border: Border {
@@ -164,24 +177,26 @@ impl AIChat {
 
                     self.stream_id = Some(Uuid::new_v4());
 
-                    Task::future(ai_client::prompt(config, messages)).then(|request_result| match request_result {
-                        Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                            let message = match chat_response_chunk {
-                                Ok(chunk) => {
-                                    if chunk.done {
-                                        Message::AIChat(AIChatMessage::StreamFinished)
-                                    } else {
-                                        Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                    Task::future(ai_client::prompt(config, messages)).then(|request_result| {
+                        match request_result {
+                            Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                                let message = match chat_response_chunk {
+                                    Ok(chunk) => {
+                                        if chunk.done {
+                                            Message::AIChat(AIChatMessage::StreamFinished)
+                                        } else {
+                                            Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                                        }
                                     }
-                                }
-                                Err(err) => {
-                                    Message::AIChat(AIChatMessage::StreamError(err.to_string()))
-                                }
-                            };
-                            message
-                        }),
-                        Err(err) => {
-                            Task::done(Message::AIChat(AIChatMessage::StreamError(err.to_string())))
+                                    Err(err) => {
+                                        Message::AIChat(AIChatMessage::StreamError(err.to_string()))
+                                    }
+                                };
+                                message
+                            }),
+                            Err(err) => Task::done(Message::AIChat(AIChatMessage::StreamError(
+                                err.to_string(),
+                            ))),
                         }
                     })
                 } else {
