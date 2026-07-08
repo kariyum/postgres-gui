@@ -2,7 +2,9 @@ use iced::border::Radius;
 use iced::futures::{Stream, StreamExt};
 use iced::keyboard::key::{self, Named};
 use iced::widget::space::horizontal;
-use iced::widget::{button, column, container, row, rule, scrollable, svg, text, text_editor};
+use iced::widget::{
+    button, column, container, markdown, row, rule, scrollable, svg, text, text_editor,
+};
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,10 +23,31 @@ pub struct AIChat {
     stream_id: Option<Uuid>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ChatMsg {
     pub role: Role,
     pub content: String,
+    markdown_content: markdown::Content,
+}
+
+impl Clone for ChatMsg {
+    fn clone(&self) -> Self {
+        Self {
+            role: self.role.clone(),
+            content: self.content.clone(),
+            markdown_content: markdown::Content::parse(&self.content),
+        }
+    }
+}
+
+impl ChatMsg {
+    pub fn new(role: Role, content: String) -> Self {
+        Self {
+            markdown_content: markdown::Content::parse(&content),
+            role,
+            content,
+        }
+    }
 }
 
 impl Into<ChatMessage> for ChatMsg {
@@ -37,7 +60,9 @@ impl Into<ChatMessage> for ChatMsg {
 }
 
 #[derive(Clone, Debug)]
-pub enum ChatMsgMessage {}
+pub enum ChatMsgMessage {
+    LinkClicked(markdown::Uri),
+}
 
 impl ChatMsg {
     fn view(&self) -> Element<'_, ChatMsgMessage> {
@@ -47,12 +72,15 @@ impl ChatMsg {
             } else {
                 iced::widget::Space::new()
             },
-            container(text(self.content.to_string()))
-                .style(|_theme| container::Style {
-                    background: Some(Background::Color(Color::TRANSPARENT)),
-                    ..Default::default()
-                })
-                .padding([8.0, 12.0])
+            container(
+                markdown::view(self.markdown_content.items(), Theme::CatppuccinMocha)
+                    .map(ChatMsgMessage::LinkClicked)
+            )
+            .style(|_theme| container::Style {
+                background: Some(Background::Color(Color::TRANSPARENT)),
+                ..Default::default()
+            })
+            .padding([8.0, 12.0])
         ])
         .into()
     }
@@ -167,10 +195,8 @@ impl AIChat {
             }
             AIChatMessage::Send => {
                 if !self.input.text().is_empty() && self.stream_id.is_none() {
-                    self.messages.push(ChatMsg {
-                        role: Role::User,
-                        content: self.input.text(),
-                    });
+                    self.messages
+                        .push(ChatMsg::new(Role::User, self.input.text()));
                     self.input.perform(text_editor::Action::SelectAll);
                     self.input
                         .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
@@ -212,17 +238,14 @@ impl AIChat {
                 if let Some(last) = self.messages.last_mut() {
                     if let Role::Assistant = last.role {
                         last.content.push_str(&chunk.message.content);
+                        last.markdown_content.push_str(&chunk.message.content);
                     } else {
-                        self.messages.push(ChatMsg {
-                            role: Role::Assistant,
-                            content: chunk.message.content,
-                        });
+                        self.messages
+                            .push(ChatMsg::new(Role::Assistant, chunk.message.content));
                     }
                 } else {
-                    self.messages.push(ChatMsg {
-                        role: Role::Assistant,
-                        content: chunk.message.content,
-                    });
+                    self.messages
+                        .push(ChatMsg::new(Role::Assistant, chunk.message.content));
                 }
 
                 if chunk.done {
