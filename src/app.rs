@@ -1,8 +1,9 @@
 use std::time::Duration;
 
+use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
-use iced::{Background, Border, Color, Element, Length, Point, Task, Theme, alignment, border};
+use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 
 use crate::ai_config::AIConfig;
@@ -14,6 +15,8 @@ use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::ai_client;
+use iced::Background;
+use iced::widget::pane_grid::{Highlight, Line, Style};
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -41,6 +44,13 @@ pub enum Message {
     AiSettings(AiSettingsMessage),
     AIChat(AIChatMessage),
     OpenAiSettings,
+    Resized(pane_grid::ResizeEvent),
+}
+
+#[derive(Debug)]
+pub enum PaneKind {
+    Main,
+    AIChat,
 }
 
 #[derive(Debug)]
@@ -55,10 +65,13 @@ pub struct App {
     pub saved_position: Option<Point>,
     pub menu_open: bool,
     pub pending_save: bool,
+    panes: pane_grid::State<PaneKind>,
 }
 
 impl Default for App {
     fn default() -> Self {
+        let (mut panes, main_pane) = pane_grid::State::new(PaneKind::Main);
+        panes.split(pane_grid::Axis::Vertical, main_pane, PaneKind::AIChat);
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
@@ -70,6 +83,7 @@ impl Default for App {
             saved_position: None,
             menu_open: false,
             pending_save: false,
+            panes,
         }
     }
 }
@@ -202,6 +216,10 @@ impl App {
             }
             Message::AiSettings(msg) => self.ai_settings.update(msg).map(Message::AiSettings),
             Message::AIChat(msg) => self.ai_chat.update(msg),
+            Message::Resized(event) => {
+                self.panes.resize(event.split, event.ratio);
+                Task::none()
+            }
         }
     }
 
@@ -258,19 +276,23 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let main = self.view_main();
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
-        let aichat = self.ai_chat.view().map(Message::AIChat);
+        let content_area =
+            pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
+                PaneKind::Main => pane_grid::Content::new(self.view_main()),
+                PaneKind::AIChat => pane_grid::Content::new(row![
+                    rule::vertical(1),
+                    self.ai_chat.view().map(Message::AIChat)
+                ]),
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(0)
+            .on_resize(10, |event| Message::Resized(event));
 
         let layout = container(column![
             self.view_title_bar(),
-            row![
-                sidebar,
-                iced::widget::rule::vertical(1),
-                main,
-                iced::widget::rule::vertical(1),
-                aichat
-            ],
+            row![sidebar, iced::widget::rule::vertical(1), content_area,],
             rule::horizontal(1.0),
             self.view_footer()
         ])
@@ -536,5 +558,4 @@ impl App {
         });
         menu_content.into()
     }
-
 }

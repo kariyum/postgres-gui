@@ -201,7 +201,10 @@ impl AIChat {
             self.editor_view(),
             self.actions_view()
         ];
-        layout.into()
+        container(layout)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     pub fn update(&mut self, message: AIChatMessage) -> Task<Message> {
