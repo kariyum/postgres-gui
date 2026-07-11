@@ -76,7 +76,9 @@ impl ChatMsg {
             },
             container(
                 markdown::view(self.markdown_content.items(), Theme::CatppuccinMocha)
+                    
                     .map(ChatMsgMessage::LinkClicked)
+                    
             )
             .style(|_theme| container::Style {
                 background: Some(Background::Color(Color::TRANSPARENT)),
