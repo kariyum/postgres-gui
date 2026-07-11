@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::ai_config::AIConfig;
 use crate::app::Message;
+use crate::core::agent_tools::ToolManager;
 use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk, ChatResponseMessage};
 
 #[derive(Clone, Debug)]
@@ -23,6 +24,7 @@ pub struct AIChat {
     config: AIConfig,
     stream_id: Option<Uuid>,
     auto_scroll: bool,
+    tool_manager: ToolManager,
 }
 
 #[derive(Debug)]
@@ -121,6 +123,7 @@ impl Default for AIChat {
             config: AIConfig::default(),
             stream_id: None,
             auto_scroll: true,
+            tool_manager: ToolManager::without_db(),
         }
     }
 }
@@ -231,10 +234,11 @@ impl AIChat {
                     let config = self.config.clone();
                     let messages: Vec<ChatMessage> =
                         self.messages.iter().map(|m| m.clone().into()).collect();
+                    let tm = self.tool_manager.clone();
 
                     self.stream_id = Some(Uuid::new_v4());
 
-                    Task::future(ai_client::prompt(config, messages)).then(|request_result| {
+                    Task::future(ai_client::prompt(config, messages, tm)).then(|request_result| {
                         match request_result {
                             Ok(stream) => Task::run(stream, |chat_response_chunk| {
                                 let message = match chat_response_chunk {
@@ -288,6 +292,20 @@ impl AIChat {
                     ChatResponseChunk::Done => {
                         self.stream_id = None;
                     }
+
+                    ChatResponseChunk::ToolCallStarted { call_id, tool_name } => {
+                        eprintln!("[pgeru] Tool call started: {tool_name} ({call_id})");
+                    }
+                    ChatResponseChunk::ToolCallDelta { call_id, args_delta } => {
+                        eprintln!("[pgeru] Tool call delta for {call_id}: {args_delta}");
+                    }
+                    ChatResponseChunk::ToolCallComplete {
+                        call_id,
+                        tool_name,
+                        args,
+                    } => {
+                        eprintln!("[pgeru] Tool call complete: {tool_name} ({call_id}) args={args}");
+                    }
                 }
 
                 if self.auto_scroll {
@@ -322,5 +340,9 @@ impl AIChat {
 
     pub fn set_config(&mut self, config: AIConfig) {
         self.config = config;
+    }
+
+    pub fn set_tool_manager(&mut self, tm: ToolManager) {
+        self.tool_manager = tm;
     }
 }

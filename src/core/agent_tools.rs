@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -569,8 +570,15 @@ impl Tool for ShowTableStats {
     }
 }
 
+#[derive(Clone)]
 pub struct ToolManager {
-    toolset: rig_core::tool::ToolSet,
+    toolset: Arc<rig_core::tool::ToolSet>,
+}
+
+impl std::fmt::Debug for ToolManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolManager").finish_non_exhaustive()
+    }
 }
 
 impl ToolManager {
@@ -583,7 +591,17 @@ impl ToolManager {
         toolset.add_tool(ExplainQuery::new(pool.clone()));
         toolset.add_tool(ShowTableStats::new(pool));
 
-        Self { toolset }
+        Self {
+            toolset: Arc::new(toolset),
+        }
+    }
+
+    /// Create a ToolManager with no database tools.
+    /// Useful as a placeholder when no connection is active.
+    pub fn without_db() -> Self {
+        Self {
+            toolset: Arc::new(rig_core::tool::ToolSet::default()),
+        }
     }
 
     pub async fn definitions(&self) -> Result<Vec<ToolDefinition>, ToolError> {
