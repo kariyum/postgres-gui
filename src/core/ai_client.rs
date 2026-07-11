@@ -53,17 +53,15 @@ pub struct ChatMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatResponseMessage {
-    pub content: String,
-    pub role: Role,
-    pub thinking: Option<String>,
+pub enum ChatResponseMessage {
+    Content(String),
+    Thinking(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatResponseChunk {
-    pub model: String,
-    pub message: ChatResponseMessage,
-    pub done: bool,
+pub enum ChatResponseChunk {
+    Message(ChatResponseMessage),
+    Done,
 }
 
 impl From<ChatMessage> for Message {
@@ -78,6 +76,10 @@ impl From<ChatMessage> for Message {
             },
             Role::System => Message::System {
                 content: msg.content,
+            },
+            Role::Thinking => Message::Assistant {
+                id: None,
+                content: OneOrMany::one(AssistantContent::text(msg.content)),
             },
         }
     }
@@ -169,7 +171,7 @@ pub async fn prompt(
     );
 
     let request = CompletionRequest {
-        model: Some(String::from("mimo-v2.5-free")),
+        model: Some(String::from("deepseek-v4-flash-free")),
         preamble: None,
         chat_history: OneOrMany::many(messages).context("Chat history cannot be empty")?,
         documents: vec![],
@@ -196,76 +198,41 @@ pub async fn prompt(
     };
 
     let model_name = config.model.clone();
-    let mapped = stream.map(move |item| match item {
-        Ok(StreamedAssistantContent::Text(text)) => {
-            eprintln!(
-                "[pgeru] prompt: [req_model={}] chunk Text {:?}",
-                model_name, text.text
-            );
-            Ok(ChatResponseChunk {
-                model: model_name.clone(),
-                message: ChatResponseMessage {
-                    content: text.text,
-                    role: Role::Assistant,
-                    thinking: None,
-                },
-                done: false,
-            })
-        }
-        Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
-            eprintln!(
-                "[pgeru] prompt: [req_model={}] chunk ReasoningDelta len={}",
-                model_name,
-                reasoning.len()
-            );
-            Ok(ChatResponseChunk {
-                model: model_name.clone(),
-                message: ChatResponseMessage {
-                    content: String::new(),
-                    role: Role::Assistant,
-                    thinking: Some(reasoning),
-                },
-                done: false,
-            })
-        }
-        Ok(StreamedAssistantContent::Final(response)) => {
-            let extra = serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
-            eprintln!(
-                "[pgeru] prompt: [req_model={}] chunk Final response_json={}",
-                model_name, extra
-            );
-            Ok(ChatResponseChunk {
-                model: model_name.clone(),
-                message: ChatResponseMessage {
-                    content: String::new(),
-                    role: Role::Assistant,
-                    thinking: None,
-                },
-                done: true,
-            })
-        }
-        Ok(_other) => {
-            eprintln!(
-                "[pgeru] prompt: [req_model={}] chunk non-text variant (skipped)",
-                model_name
-            );
-            Ok(ChatResponseChunk {
-                model: model_name.clone(),
-                message: ChatResponseMessage {
-                    content: String::new(),
-                    role: Role::Assistant,
-                    thinking: None,
-                },
-                done: false,
-            })
-        }
-        Err(err) => {
-            eprintln!(
-                "[pgeru] prompt: [req_model={}] stream error: {err}",
-                model_name
-            );
-            Err(anyhow::anyhow!("{}", err))
-        }
+    let mapped = stream.map(move |item| {
+        item.map(|content| match content {
+            StreamedAssistantContent::Text(text) => {
+                ChatResponseChunk::Message(ChatResponseMessage::Content(text.text))
+            }
+            StreamedAssistantContent::ToolCall {
+                tool_call,
+                internal_call_id,
+            } => todo!(),
+            StreamedAssistantContent::ToolCallDelta {
+                id,
+                internal_call_id,
+                content,
+            } => todo!(),
+            StreamedAssistantContent::Reasoning(reasoning) => todo!(),
+
+            StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
+                eprintln!(
+                    "[pgeru] prompt: [req_model={}] chunk ReasoningDelta len={}",
+                    model_name,
+                    reasoning.len()
+                );
+                ChatResponseChunk::Message(ChatResponseMessage::Thinking(reasoning))
+            }
+
+            StreamedAssistantContent::Final(response) => {
+                let extra = serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
+                eprintln!(
+                    "[pgeru] prompt: [req_model={}] chunk Final response_json={}",
+                    model_name, extra
+                );
+                ChatResponseChunk::Done
+            }
+        })
+        .map_err(Into::into)
     });
 
     Ok(mapped)

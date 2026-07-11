@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::ai_config::AIConfig;
 use crate::app::Message;
-use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk};
+use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk, ChatResponseMessage};
 
 #[derive(Clone, Debug)]
 pub struct AIChat {
@@ -93,6 +93,7 @@ impl ChatMsg {
 pub enum Role {
     User,
     Assistant,
+    Thinking,
     System,
 }
 
@@ -236,7 +237,7 @@ impl AIChat {
                             Ok(stream) => Task::run(stream, |chat_response_chunk| {
                                 let message = match chat_response_chunk {
                                     Ok(chunk) => {
-                                        if chunk.done {
+                                        if let ChatResponseChunk::Done = chunk {
                                             Message::AIChat(AIChatMessage::StreamFinished)
                                         } else {
                                             Message::AIChat(AIChatMessage::ChunkReceived(chunk))
@@ -259,21 +260,32 @@ impl AIChat {
             }
             AIChatMessage::MessageAction(_) => Task::none(),
             AIChatMessage::ChunkReceived(chunk) => {
-                if let Some(last) = self.messages.last_mut() {
-                    if let Role::Assistant = last.role {
-                        last.content.push_str(&chunk.message.content);
-                        last.markdown_content.push_str(&chunk.message.content);
-                    } else {
-                        self.messages
-                            .push(ChatMsg::new(Role::Assistant, chunk.message.content));
-                    }
-                } else {
-                    self.messages
-                        .push(ChatMsg::new(Role::Assistant, chunk.message.content));
-                }
+                match chunk {
+                    ChatResponseChunk::Message(msg) => match msg {
+                        ai_client::ChatResponseMessage::Content(delta) => {
+                            if let Some(last) = self.messages.last_mut()
+                                && let Role::Assistant = last.role
+                            {
+                                last.content.push_str(&delta);
+                                last.markdown_content.push_str(&delta);
+                            } else {
+                                self.messages.push(ChatMsg::new(Role::Assistant, delta));
+                            }
+                        }
+                        ai_client::ChatResponseMessage::Thinking(delta) => {
+                            if let Some(last) = self.messages.last_mut()
+                                && let Role::Thinking = last.role
+                            {
+                                last.markdown_content.push_str(&delta);
+                            } else {
+                                self.messages.push(ChatMsg::new(Role::Thinking, delta));
+                            }
+                        }
+                    },
 
-                if chunk.done {
-                    self.stream_id = None;
+                    ChatResponseChunk::Done => {
+                        self.stream_id = None;
+                    }
                 }
 
                 if self.auto_scroll {
