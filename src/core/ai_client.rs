@@ -86,6 +86,9 @@ impl From<ChatMessage> for Message {
                 id: None,
                 content: OneOrMany::one(AssistantContent::text(msg.content)),
             },
+            Role::Tool => Message::User {
+                content: OneOrMany::one(UserContent::text(msg.content)),
+            },
         }
     }
 }

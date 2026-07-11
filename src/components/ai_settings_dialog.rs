@@ -61,6 +61,7 @@ impl AiSettingsForm {
                 Some(api_key.to_string())
             },
             model: self.model.value.trim().to_string(),
+            tools_enabled: true,
         }
     }
 }

@@ -14,6 +14,7 @@ use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
+use crate::core::agent_tools::ToolManager;
 use crate::core::ai_client;
 use iced::Background;
 use iced::widget::pane_grid::{Highlight, Line, Style};
@@ -107,6 +108,7 @@ impl App {
 
             Message::ConnManager(msg) => {
                 let task = self.manager.update(msg, &mut self.dialog);
+                self.sync_ai_tools();
                 task.map(Message::ConnManager)
             }
 
@@ -557,5 +559,17 @@ impl App {
             ..Default::default()
         });
         menu_content.into()
+    }
+
+    fn sync_ai_tools(&mut self) {
+        if let Some(ref active_id) = self.manager.active_connection {
+            if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
+                if let Some(pool) = item.pool.clone() {
+                    self.ai_chat.set_tool_manager(ToolManager::new(pool));
+                    return;
+                }
+            }
+        }
+        self.ai_chat.set_tool_manager(ToolManager::without_db());
     }
 }

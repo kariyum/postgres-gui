@@ -31,6 +31,18 @@ impl From<sqlx::Error> for ToolError {
     }
 }
 
+pub fn needs_approval(tool_name: &str, args_json: &str) -> bool {
+    if tool_name != "execute_sql" {
+        return false;
+    }
+    if let Ok(val) = serde_json::from_str::<Value>(args_json) {
+        if let Some(sql) = val.get("sql").and_then(|v| v.as_str()) {
+            return is_destructive(sql);
+        }
+    }
+    false
+}
+
 pub fn is_destructive(sql: &str) -> bool {
     let trimmed = sql.trim().to_uppercase();
     trimmed.starts_with("INSERT")

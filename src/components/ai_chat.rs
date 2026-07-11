@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use iced::border::Radius;
 use iced::futures::{Stream, StreamExt};
 use iced::keyboard::key::{self, Named};
@@ -12,7 +14,7 @@ use uuid::Uuid;
 
 use crate::ai_config::AIConfig;
 use crate::app::Message;
-use crate::core::agent_tools::ToolManager;
+use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk, ChatResponseMessage};
 
 #[derive(Clone, Debug)]
@@ -25,6 +27,27 @@ pub struct AIChat {
     stream_id: Option<Uuid>,
     auto_scroll: bool,
     tool_manager: ToolManager,
+    pending_tool_calls: HashMap<String, (String, String)>,
+    tool_call_entries: Vec<ToolCallEntry>,
+}
+
+#[derive(Clone, Debug)]
+struct ToolCallEntry {
+    call_id: String,
+    tool_name: String,
+    args: String,
+    result: Option<String>,
+    error: Option<String>,
+    status: ToolCallStatus,
+}
+
+#[derive(Clone, Debug)]
+enum ToolCallStatus {
+    PendingApproval,
+    Running,
+    Completed,
+    Failed,
+    Rejected,
 }
 
 #[derive(Debug)]
@@ -70,23 +93,27 @@ pub enum ChatMsgMessage {
 
 impl ChatMsg {
     fn view(&self) -> Element<'_, ChatMsgMessage> {
+        let content = container(
+            markdown::view(self.markdown_content.items(), Theme::CatppuccinMocha)
+                .map(ChatMsgMessage::LinkClicked),
+        )
+        .style(|_theme| container::Style {
+            background: Some(if let Role::Tool = self.role {
+                Background::Color(Color::from_rgba(0.15, 0.15, 0.25, 0.4))
+            } else {
+                Background::Color(Color::TRANSPARENT)
+            }),
+            ..Default::default()
+        })
+        .padding([8.0, 12.0]);
+
         container(row![
             if let Role::User = self.role {
                 horizontal()
             } else {
                 iced::widget::Space::new()
             },
-            container(
-                markdown::view(self.markdown_content.items(), Theme::CatppuccinMocha)
-                    
-                    .map(ChatMsgMessage::LinkClicked)
-                    
-            )
-            .style(|_theme| container::Style {
-                background: Some(Background::Color(Color::TRANSPARENT)),
-                ..Default::default()
-            })
-            .padding([8.0, 12.0])
+            content,
         ])
         .into()
     }
@@ -99,6 +126,155 @@ pub enum Role {
     Assistant,
     Thinking,
     System,
+    Tool,
+}
+
+impl ToolCallEntry {
+    fn icon(&self) -> &'static str {
+        match self.tool_name.as_str() {
+            "execute_sql" => "\u{1F5C4}\u{FE0F}",
+            "list_schemas" | "list_tables" => "\u{1F4CB}",
+            "describe_table" => "\u{1F50D}",
+            "explain_query" => "\u{1F4CA}",
+            "show_table_stats" => "\u{1F4C8}",
+            _ => "\u{1F527}",
+        }
+    }
+
+    fn status_label(&self) -> &'static str {
+        match &self.status {
+            ToolCallStatus::PendingApproval => "\u{26A0}\u{FE0F} Needs approval",
+            ToolCallStatus::Running => "\u{23F3} Running...",
+            ToolCallStatus::Completed => "\u{2705} Done",
+            ToolCallStatus::Failed => "\u{274C} Failed",
+            ToolCallStatus::Rejected => "\u{1F6AB} Rejected",
+        }
+    }
+
+    fn view(&self) -> Element<'_, AIChatMessage> {
+        let mut children: Vec<Element<'_, AIChatMessage>> = vec![
+            row![
+                text(format!("{} {}", self.icon(), self.tool_name)).size(13),
+                horizontal(),
+                text(self.status_label()).size(11).color(Color::from_rgba(
+                    0.7, 0.7, 0.9, 1.0,
+                )),
+            ]
+            .spacing(8)
+            .into(),
+            container(text(&self.args).size(11))
+                .padding([4, 6])
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.2,
+                    ))),
+                    border: Border {
+                        color: Color::from_rgba(0.5, 0.5, 0.8, 0.2),
+                        width: 1.0,
+                        radius: Radius::new(4.0),
+                    },
+                    ..Default::default()
+                })
+                .into(),
+        ];
+
+        if let Some(result) = &self.result {
+            children.push(
+                container(text(result).size(11))
+                    .padding([4, 6])
+                    .style(|_: &Theme| container::Style {
+                        background: Some(Background::Color(Color::from_rgba(
+                            0.0, 0.2, 0.0, 0.15,
+                        ))),
+                        border: Border {
+                            color: Color::from_rgba(0.3, 0.8, 0.3, 0.3),
+                            width: 1.0,
+                            radius: Radius::new(4.0),
+                        },
+                        ..Default::default()
+                    })
+                    .into(),
+            );
+        }
+
+        if let Some(error) = &self.error {
+            children.push(
+                container(text(error).size(11).color(Color::from_rgb(1.0, 0.3, 0.3)))
+                    .padding([4, 6])
+                    .style(|_: &Theme| container::Style {
+                        background: Some(Background::Color(Color::from_rgba(
+                            0.3, 0.0, 0.0, 0.15,
+                        ))),
+                        border: Border {
+                            color: Color::from_rgba(1.0, 0.3, 0.3, 0.3),
+                            width: 1.0,
+                            radius: Radius::new(4.0),
+                        },
+                        ..Default::default()
+                    })
+                    .into(),
+            );
+        }
+
+        if let ToolCallStatus::PendingApproval = &self.status {
+            children.push(
+                row![
+                    button(
+                        text("Approve")
+                            .size(12)
+                            .color(Color::from_rgb(0.2, 0.8, 0.2))
+                    )
+                    .on_press(AIChatMessage::ApproveToolCall(self.call_id.clone()))
+                    .style(|_theme, _status| button::Style {
+                        background: Some(Background::Color(Color::from_rgba(
+                            0.0, 0.3, 0.0, 0.3,
+                        ))),
+                        border: Border {
+                            color: Color::from_rgba(0.2, 0.8, 0.2, 0.5),
+                            width: 1.0,
+                            radius: Radius::new(4.0),
+                        },
+                        ..Default::default()
+                    }),
+                    button(
+                        text("Reject")
+                            .size(12)
+                            .color(Color::from_rgb(1.0, 0.3, 0.3))
+                    )
+                    .on_press(AIChatMessage::RejectToolCall(self.call_id.clone()))
+                    .style(|_theme, _status| button::Style {
+                        background: Some(Background::Color(Color::from_rgba(
+                            0.3, 0.0, 0.0, 0.3,
+                        ))),
+                        border: Border {
+                            color: Color::from_rgba(1.0, 0.3, 0.3, 0.5),
+                            width: 1.0,
+                            radius: Radius::new(4.0),
+                        },
+                        ..Default::default()
+                    }),
+                ]
+                .spacing(8)
+                .into(),
+            );
+        }
+
+        container(column(children).spacing(4))
+            .padding(8)
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(Color::from_rgba(
+                    0.15, 0.15, 0.25, 0.6,
+                ))),
+                border: Border {
+                    color: Color::from_rgba(0.5, 0.5, 0.9, 0.3),
+                    width: 1.0,
+                    radius: Radius::new(6.0),
+                },
+                ..Default::default()
+            })
+            .max_width(500)
+            .into()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +287,12 @@ pub enum AIChatMessage {
     StreamError(String),
     StreamFinished,
     UserScrolled(scrollable::Viewport),
+    ApproveToolCall(String),
+    RejectToolCall(String),
+    ToolExecutionResult {
+        call_id: String,
+        result: Result<String, String>,
+    },
 }
 
 impl Default for AIChat {
@@ -124,18 +306,30 @@ impl Default for AIChat {
             stream_id: None,
             auto_scroll: true,
             tool_manager: ToolManager::without_db(),
+            pending_tool_calls: HashMap::new(),
+            tool_call_entries: Vec::new(),
         }
     }
 }
 
 impl AIChat {
     fn messages_view(&self) -> Element<'_, AIChatMessage> {
-        let messages_col = column(
-            self.messages
-                .iter()
-                .map(|msg| msg.view().map(AIChatMessage::MessageAction)),
-        );
-        scrollable(messages_col)
+        let msg_els: Vec<Element<'_, AIChatMessage>> = self
+            .messages
+            .iter()
+            .map(|msg| msg.view().map(AIChatMessage::MessageAction))
+            .collect();
+
+        let tool_els: Vec<Element<'_, AIChatMessage>> = self
+            .tool_call_entries
+            .iter()
+            .map(|entry| entry.view())
+            .collect();
+
+        let all: Vec<Element<'_, AIChatMessage>> =
+            msg_els.into_iter().chain(tool_els).collect();
+
+        scrollable(column(all))
             .id("chat_messages")
             .on_scroll(AIChatMessage::UserScrolled)
             .height(Length::Fill)
@@ -231,6 +425,9 @@ impl AIChat {
                     self.input
                         .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
 
+                    self.tool_call_entries.clear();
+                    self.pending_tool_calls.clear();
+
                     let config = self.config.clone();
                     let messages: Vec<ChatMessage> =
                         self.messages.iter().map(|m| m.clone().into()).collect();
@@ -266,6 +463,8 @@ impl AIChat {
             }
             AIChatMessage::MessageAction(_) => Task::none(),
             AIChatMessage::ChunkReceived(chunk) => {
+                let mut task = Task::none();
+
                 match chunk {
                     ChatResponseChunk::Message(msg) => match msg {
                         ai_client::ChatResponseMessage::Content(delta) => {
@@ -289,30 +488,113 @@ impl AIChat {
                         }
                     },
 
-                    ChatResponseChunk::Done => {
-                        self.stream_id = None;
-                    }
-
                     ChatResponseChunk::ToolCallStarted { call_id, tool_name } => {
-                        eprintln!("[pgeru] Tool call started: {tool_name} ({call_id})");
+                        self.pending_tool_calls
+                            .insert(call_id, (tool_name, String::new()));
                     }
                     ChatResponseChunk::ToolCallDelta { call_id, args_delta } => {
-                        eprintln!("[pgeru] Tool call delta for {call_id}: {args_delta}");
+                        if let Some((_, args)) = self.pending_tool_calls.get_mut(&call_id) {
+                            args.push_str(&args_delta);
+                        }
                     }
                     ChatResponseChunk::ToolCallComplete {
                         call_id,
                         tool_name,
                         args,
                     } => {
-                        eprintln!("[pgeru] Tool call complete: {tool_name} ({call_id}) args={args}");
+                        self.pending_tool_calls.remove(&call_id);
+
+                        let needs_approval = needs_approval(&tool_name, &args);
+                        let status = if needs_approval {
+                            ToolCallStatus::PendingApproval
+                        } else {
+                            ToolCallStatus::Running
+                        };
+
+                        self.tool_call_entries.push(ToolCallEntry {
+                            call_id: call_id.clone(),
+                            tool_name: tool_name.clone(),
+                            args: args.clone(),
+                            result: None,
+                            error: None,
+                            status,
+                        });
+
+                        if !needs_approval {
+                            let tm = self.tool_manager.clone();
+                            task = Task::perform(
+                                async move { tm.execute(&tool_name, &args).await },
+                                move |result| {
+                                    Message::AIChat(AIChatMessage::ToolExecutionResult {
+                                        call_id,
+                                        result: result.map_err(|e| e.0),
+                                    })
+                                },
+                            );
+                        }
                     }
+                    ChatResponseChunk::Done => {}
                 }
 
                 if self.auto_scroll {
-                    operation::snap_to_end(iced::widget::Id::new("chat_messages"))
+                    task = task.chain(operation::snap_to_end(iced::widget::Id::new(
+                        "chat_messages",
+                    )));
+                }
+
+                task
+            }
+            AIChatMessage::ApproveToolCall(call_id) => {
+                if let Some(entry) = self
+                    .tool_call_entries
+                    .iter_mut()
+                    .find(|e| e.call_id == call_id)
+                {
+                    entry.status = ToolCallStatus::Running;
+                    let tool_name = entry.tool_name.clone();
+                    let args = entry.args.clone();
+                    let tm = self.tool_manager.clone();
+                    Task::perform(
+                        async move { tm.execute(&tool_name, &args).await },
+                        move |result| {
+                            Message::AIChat(AIChatMessage::ToolExecutionResult {
+                                call_id,
+                                result: result.map_err(|e| e.0),
+                            })
+                        },
+                    )
                 } else {
                     Task::none()
                 }
+            }
+            AIChatMessage::RejectToolCall(call_id) => {
+                if let Some(entry) = self
+                    .tool_call_entries
+                    .iter_mut()
+                    .find(|e| e.call_id == call_id)
+                {
+                    entry.status = ToolCallStatus::Rejected;
+                }
+                self.maybe_re_prompt()
+            }
+            AIChatMessage::ToolExecutionResult { call_id, result } => {
+                if let Some(entry) = self
+                    .tool_call_entries
+                    .iter_mut()
+                    .find(|e| e.call_id == call_id)
+                {
+                    match result {
+                        Ok(data) => {
+                            entry.result = Some(data);
+                            entry.status = ToolCallStatus::Completed;
+                        }
+                        Err(err) => {
+                            entry.error = Some(err);
+                            entry.status = ToolCallStatus::Failed;
+                        }
+                    }
+                }
+                self.maybe_re_prompt()
             }
             AIChatMessage::StreamError(err) => {
                 self.error = Some(err);
@@ -321,7 +603,8 @@ impl AIChat {
             }
             AIChatMessage::StreamFinished => {
                 self.stream_id = None;
-                Task::none()
+                self.pending_tool_calls.clear();
+                self.maybe_re_prompt()
             }
             AIChatMessage::UserScrolled(viewport) => {
                 let offset = viewport.absolute_offset();
@@ -344,5 +627,84 @@ impl AIChat {
 
     pub fn set_tool_manager(&mut self, tm: ToolManager) {
         self.tool_manager = tm;
+    }
+
+    fn all_tool_calls_complete(&self) -> bool {
+        if self.tool_call_entries.is_empty() {
+            return false;
+        }
+        self.tool_call_entries.iter().all(|e| {
+            matches!(
+                e.status,
+                ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Rejected
+            )
+        })
+    }
+
+    fn maybe_re_prompt(&mut self) -> Task<Message> {
+        if self.stream_id.is_some() {
+            return Task::none();
+        }
+        if !self.all_tool_calls_complete() {
+            return Task::none();
+        }
+
+        for entry in &self.tool_call_entries {
+            let content = match &entry.result {
+                Some(r) => {
+                    format!(
+                        "Tool '{}' was called with args: {}\n\nResult:\n{}",
+                        entry.tool_name, entry.args, r
+                    )
+                }
+                None => match &entry.error {
+                    Some(e) => {
+                        format!(
+                            "Tool '{}' was called with args: {}\n\nError:\n{}",
+                            entry.tool_name, entry.args, e
+                        )
+                    }
+                    None => {
+                        format!(
+                            "Tool '{}' was called with args: {}\n\nThe call was rejected by the user.",
+                            entry.tool_name, entry.args
+                        )
+                    }
+                },
+            };
+            self.messages.push(ChatMsg::new(Role::Tool, content));
+        }
+
+        self.tool_call_entries.clear();
+
+        let config = self.config.clone();
+        let messages: Vec<ChatMessage> =
+            self.messages.iter().map(|m| m.clone().into()).collect();
+        let tm = self.tool_manager.clone();
+
+        self.stream_id = Some(Uuid::new_v4());
+
+        Task::future(ai_client::prompt(config, messages, tm)).then(|request_result| {
+            match request_result {
+                Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                    let message = match chat_response_chunk {
+                        Ok(chunk) => {
+                            if let ChatResponseChunk::Done = chunk {
+                                Message::AIChat(AIChatMessage::StreamFinished)
+                            } else {
+                                Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                            }
+                        }
+                        Err(err) => {
+                            Message::AIChat(AIChatMessage::StreamError(err.to_string()))
+                        }
+                    };
+                    message
+                }),
+                Err(err) => Task::done(Message::AIChat(AIChatMessage::StreamError(
+                    err.to_string(),
+                ))),
+            }
+        })
     }
 }
