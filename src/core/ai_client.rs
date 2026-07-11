@@ -63,7 +63,11 @@ pub enum ChatResponseMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChatResponseChunk {
     Message(ChatResponseMessage),
-    ToolCallStarted { call_id: String, tool_name: String },
+    ToolCallStarted {
+        call_id: String,
+        tool_name: String,
+        initial_args: String,
+    },
     ToolCallDelta { call_id: String, args_delta: String },
     ToolCallComplete { call_id: String, tool_name: String, args: String },
     Done,
@@ -245,13 +249,21 @@ pub async fn prompt(
                 tool_call,
                 internal_call_id,
             } => {
+                let initial_args = match tool_call.function.arguments {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
                 eprintln!(
-                    "[pgeru] prompt: [req_model={}] ToolCall name={} internal_id={}",
-                    model_name, tool_call.function.name, internal_call_id
+                    "[pgeru] prompt: [req_model={}] ToolCall name={} internal_id={} initial_args_len={}",
+                    model_name,
+                    tool_call.function.name,
+                    internal_call_id,
+                    initial_args.len()
                 );
                 ChatResponseChunk::ToolCallStarted {
                     call_id: internal_call_id,
                     tool_name: tool_call.function.name,
+                    initial_args,
                 }
             }
             StreamedAssistantContent::ToolCallDelta {

@@ -33,12 +33,20 @@ impl From<sqlx::Error> for ToolError {
 
 pub fn needs_approval(tool_name: &str, args_json: &str) -> bool {
     if tool_name != "execute_sql" {
+        eprintln!("[pgeru:tools] needs_approval({tool_name}): not execute_sql, no approval needed");
         return false;
     }
     if let Ok(val) = serde_json::from_str::<Value>(args_json) {
         if let Some(sql) = val.get("sql").and_then(|v| v.as_str()) {
-            return is_destructive(sql);
+            let destructive = is_destructive(sql);
+            eprintln!(
+                "[pgeru:tools] needs_approval(execute_sql): sql={sql:?} destructive={destructive}"
+            );
+            return destructive;
         }
+        eprintln!("[pgeru:tools] needs_approval(execute_sql): no 'sql' field in args_json");
+    } else {
+        eprintln!("[pgeru:tools] needs_approval: failed to parse args_json as JSON: {args_json}");
     }
     false
 }
@@ -201,7 +209,7 @@ fn cell_to_value(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> Va
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListSchemasArgs;
+pub struct ListSchemasArgs {}
 
 pub struct ListSchemas {
     pool: PgPool,
@@ -624,9 +632,22 @@ impl ToolManager {
     }
 
     pub async fn execute(&self, tool_name: &str, args_json: &str) -> Result<String, ToolError> {
-        self.toolset
+        eprintln!(
+            "[pgeru:tools] execute({tool_name}) starting, args_len={}",
+            args_json.len()
+        );
+        let result = self
+            .toolset
             .call(tool_name, args_json.to_string())
             .await
-            .map_err(|e| ToolError(e.to_string()))
+            .map_err(|e| ToolError(e.to_string()));
+        match &result {
+            Ok(out) => eprintln!(
+                "[pgeru:tools] execute({tool_name}) succeeded, output_len={}",
+                out.len()
+            ),
+            Err(e) => eprintln!("[pgeru:tools] execute({tool_name}) failed: {e}"),
+        }
+        result
     }
 }

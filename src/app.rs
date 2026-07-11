@@ -566,10 +566,12 @@ impl App {
             if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
                 if let Some(pool) = item.pool.clone() {
                     self.ai_chat.set_tool_manager(ToolManager::new(pool));
+                    eprintln!("[pgeru:app] sync_ai_tools: created ToolManager for connection {active_id}");
                     return;
                 }
             }
         }
         self.ai_chat.set_tool_manager(ToolManager::without_db());
+        eprintln!("[pgeru:app] sync_ai_tools: no active pool, using ToolManager::without_db()");
     }
 }
