@@ -6,12 +6,7 @@ pub struct AIConfig {
     #[serde(default)]
     pub api_key: Option<String>,
     pub model: String,
-    #[serde(default = "default_tools_enabled")]
     pub tools_enabled: bool,
-}
-
-fn default_tools_enabled() -> bool {
-    true
 }
 
 impl Default for AIConfig {

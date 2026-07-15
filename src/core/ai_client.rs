@@ -10,9 +10,11 @@ use rig_core::OneOrMany;
 use rig_core::client::{CompletionClient, ModelListingClient};
 use rig_core::completion::message::{AssistantContent, UserContent};
 use rig_core::completion::{CompletionModel, CompletionRequest, Message};
-use rig_core::providers::openai;
 use rig_core::message::ReasoningContent;
-use rig_core::streaming::{StreamedAssistantContent, StreamingCompletionResponse, ToolCallDeltaContent};
+use rig_core::providers::openai;
+use rig_core::streaming::{
+    StreamedAssistantContent, StreamingCompletionResponse, ToolCallDeltaContent,
+};
 
 use crate::core::agent_tools::ToolManager;
 use crate::{ai_config::AIConfig, components::ai_chat::Role};
@@ -68,8 +70,15 @@ pub enum ChatResponseChunk {
         tool_name: String,
         initial_args: String,
     },
-    ToolCallDelta { call_id: String, args_delta: String },
-    ToolCallComplete { call_id: String, tool_name: String, args: String },
+    ToolCallDelta {
+        call_id: String,
+        args_delta: String,
+    },
+    ToolCallComplete {
+        call_id: String,
+        tool_name: String,
+        args: String,
+    },
     Done,
 }
 
@@ -136,19 +145,27 @@ pub async fn prompt_ollama(
     Ok(parsed_stream)
 }
 
+fn build_preamble() -> String {
+    format!("{} {}",
+        "You are the core AI intelligence engine integrated into a native PostgreSQL GUI desktop client. Your primary objective is to assist developers and database administrators in safely writing, optimizing, and understanding PostgreSQL queries.
+        Follow these strict operational constraints:
+        1. SQL Generation: Always generate clean, idiomatic PostgreSQL syntax. Capitalize SQL keywords (e.g., SELECT, JOIN, WHERE, GROUP BY).
+        2. Safety & Destructive Actions: If the user asks for a destructive operation (DROP, TRUNCATE, DELETE without a WHERE clause), you must wrap the SQL code block, explicitly warn them of the data loss risk, and suggest using a TRANSACTION (BEGIN; ... ROLLBACK/COMMIT;) for safety.
+        3. Schema Awareness: Assume standard PostgreSQL data types and features (such as JSONB, UUIDs, window functions, and CTEs) are fully available.
+        4. Formatting: When returning SQL, always format it within standard markdown code blocks tagged as ```sql. Keep explanations brief, technical, and precise.
+        5. Content Isolation: Never include markdown formatting, conversational filler, or prose inside the ```sql code block itself—keep the code completely raw and ready to execute.
+
+        Tool Usage:
+        You have PostgreSQL database tools available. Use them to inspect the database schema and execute queries when asked about database contents. Destructive operations (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE) will require user approval before execution.",
+        ""
+    )
+}
+
 pub async fn prompt(
     config: AIConfig,
     prompt: Vec<ChatMessage>,
     tool_manager: ToolManager,
 ) -> anyhow::Result<impl Stream<Item = anyhow::Result<ChatResponseChunk>>> {
-    eprintln!(
-        "[pgeru] prompt: config={{ endpoint: {}, model: {}, has_api_key: {} }} prompt_len: {}",
-        config.endpoint,
-        config.model,
-        config.api_key.is_some(),
-        prompt.len()
-    );
-
     let api_key = config.api_key.clone().unwrap_or_default();
 
     let base_url = {
@@ -188,29 +205,7 @@ pub async fn prompt(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to get tool definitions: {e}"))?;
 
-    let preamble = if tool_definitions.is_empty() {
-        String::from("You are the core AI intelligence engine integrated into a native PostgreSQL GUI desktop client. Your primary objective is to assist developers and database administrators in safely writing, optimizing, and understanding PostgreSQL queries.
-        Follow these strict operational constraints:
-        1. SQL Generation: Always generate clean, idiomatic PostgreSQL syntax. Capitalize SQL keywords (e.g., SELECT, JOIN, WHERE, GROUP BY).
-        2. Safety & Destructive Actions: If the user asks for a destructive operation (DROP, TRUNCATE, DELETE without a WHERE clause), you must wrap the SQL code block, explicitly warn them of the data loss risk, and suggest using a TRANSACTION (BEGIN; ... ROLLBACK/COMMIT;) for safety.
-        3. Schema Awareness: Assume standard PostgreSQL data types and features (such as JSONB, UUIDs, window functions, and CTEs) are fully available.
-        4. Formatting: When returning SQL, always format it within standard markdown code blocks tagged as ```sql. Keep explanations brief, technical, and precise.
-        5. Content Isolation: Never include markdown formatting, conversational filler, or prose inside the ```sql code block itself—keep the code completely raw and ready to execute.")
-    } else {
-        format!("{} {}",
-            "You are the core AI intelligence engine integrated into a native PostgreSQL GUI desktop client. Your primary objective is to assist developers and database administrators in safely writing, optimizing, and understanding PostgreSQL queries.
-            Follow these strict operational constraints:
-            1. SQL Generation: Always generate clean, idiomatic PostgreSQL syntax. Capitalize SQL keywords (e.g., SELECT, JOIN, WHERE, GROUP BY).
-            2. Safety & Destructive Actions: If the user asks for a destructive operation (DROP, TRUNCATE, DELETE without a WHERE clause), you must wrap the SQL code block, explicitly warn them of the data loss risk, and suggest using a TRANSACTION (BEGIN; ... ROLLBACK/COMMIT;) for safety.
-            3. Schema Awareness: Assume standard PostgreSQL data types and features (such as JSONB, UUIDs, window functions, and CTEs) are fully available.
-            4. Formatting: When returning SQL, always format it within standard markdown code blocks tagged as ```sql. Keep explanations brief, technical, and precise.
-            5. Content Isolation: Never include markdown formatting, conversational filler, or prose inside the ```sql code block itself—keep the code completely raw and ready to execute.
-
-            Tool Usage:
-            You have PostgreSQL database tools available. Use them to inspect the database schema and execute queries when asked about database contents. Destructive operations (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE) will require user approval before execution.",
-            ""
-        )
-    };
+    let preamble = build_preamble();
 
     let request = CompletionRequest {
         model: Some(String::from("deepseek-v4-flash-free")),

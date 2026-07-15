@@ -156,18 +156,16 @@ impl ToolCallEntry {
             row![
                 text(format!("{} {}", self.icon(), self.tool_name)).size(13),
                 horizontal(),
-                text(self.status_label()).size(11).color(Color::from_rgba(
-                    0.7, 0.7, 0.9, 1.0,
-                )),
+                text(self.status_label())
+                    .size(11)
+                    .color(Color::from_rgba(0.7, 0.7, 0.9, 1.0,)),
             ]
             .spacing(8)
             .into(),
             container(text(&self.args).size(11))
                 .padding([4, 6])
                 .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.2,
-                    ))),
+                    background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.2))),
                     border: Border {
                         color: Color::from_rgba(0.5, 0.5, 0.8, 0.2),
                         width: 1.0,
@@ -183,9 +181,7 @@ impl ToolCallEntry {
                 container(text(result).size(11))
                     .padding([4, 6])
                     .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgba(
-                            0.0, 0.2, 0.0, 0.15,
-                        ))),
+                        background: Some(Background::Color(Color::from_rgba(0.0, 0.2, 0.0, 0.15))),
                         border: Border {
                             color: Color::from_rgba(0.3, 0.8, 0.3, 0.3),
                             width: 1.0,
@@ -202,9 +198,7 @@ impl ToolCallEntry {
                 container(text(error).size(11).color(Color::from_rgb(1.0, 0.3, 0.3)))
                     .padding([4, 6])
                     .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgba(
-                            0.3, 0.0, 0.0, 0.15,
-                        ))),
+                        background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.15))),
                         border: Border {
                             color: Color::from_rgba(1.0, 0.3, 0.3, 0.3),
                             width: 1.0,
@@ -226,9 +220,7 @@ impl ToolCallEntry {
                     )
                     .on_press(AIChatMessage::ApproveToolCall(self.call_id.clone()))
                     .style(|_theme, _status| button::Style {
-                        background: Some(Background::Color(Color::from_rgba(
-                            0.0, 0.3, 0.0, 0.3,
-                        ))),
+                        background: Some(Background::Color(Color::from_rgba(0.0, 0.3, 0.0, 0.3,))),
                         border: Border {
                             color: Color::from_rgba(0.2, 0.8, 0.2, 0.5),
                             width: 1.0,
@@ -243,9 +235,7 @@ impl ToolCallEntry {
                     )
                     .on_press(AIChatMessage::RejectToolCall(self.call_id.clone()))
                     .style(|_theme, _status| button::Style {
-                        background: Some(Background::Color(Color::from_rgba(
-                            0.3, 0.0, 0.0, 0.3,
-                        ))),
+                        background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.3,))),
                         border: Border {
                             color: Color::from_rgba(1.0, 0.3, 0.3, 0.5),
                             width: 1.0,
@@ -262,9 +252,7 @@ impl ToolCallEntry {
         container(column(children).spacing(4))
             .padding(8)
             .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color::from_rgba(
-                    0.15, 0.15, 0.25, 0.6,
-                ))),
+                background: Some(Background::Color(Color::from_rgba(0.15, 0.15, 0.25, 0.6))),
                 border: Border {
                     color: Color::from_rgba(0.5, 0.5, 0.9, 0.3),
                     width: 1.0,
@@ -326,8 +314,7 @@ impl AIChat {
             .map(|entry| entry.view())
             .collect();
 
-        let all: Vec<Element<'_, AIChatMessage>> =
-            msg_els.into_iter().chain(tool_els).collect();
+        let all: Vec<Element<'_, AIChatMessage>> = msg_els.into_iter().chain(tool_els).collect();
 
         scrollable(column(all))
             .id("chat_messages")
@@ -427,29 +414,17 @@ impl AIChat {
                     self.input
                         .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
 
-                    let prev_entries = self.tool_call_entries.len();
                     self.tool_call_entries.clear();
                     self.pending_tool_calls.clear();
-                    eprintln!(
-                        "[pgeru:ai] Send: cleared {} tool_call_entries and pending_tool_calls",
-                        prev_entries
-                    );
 
-                    let config = self.config.clone();
                     let messages: Vec<ChatMessage> =
                         self.messages.iter().map(|m| m.clone().into()).collect();
                     let tm = self.tool_manager.clone();
 
-                    eprintln!(
-                        "[pgeru:ai] Send: {} messages, model={}",
-                        messages.len(),
-                        config.model,
-                    );
-
                     self.stream_id = Some(Uuid::new_v4());
 
-                    Task::future(ai_client::prompt(config, messages, tm)).then(|request_result| {
-                        match request_result {
+                    Task::future(ai_client::prompt(self.config.clone(), messages, tm)).then(
+                        |request_result| match request_result {
                             Ok(stream) => Task::run(stream, |chat_response_chunk| {
                                 let message = match chat_response_chunk {
                                     Ok(chunk) => {
@@ -468,14 +443,9 @@ impl AIChat {
                             Err(err) => Task::done(Message::AIChat(AIChatMessage::StreamError(
                                 err.to_string(),
                             ))),
-                        }
-                    })
+                        },
+                    )
                 } else {
-                    eprintln!(
-                        "[pgeru:ai] Send: skipped (input_empty={}, stream_id_is_some={})",
-                        self.input.text().is_empty(),
-                        self.stream_id.is_some()
-                    );
                     Task::none()
                 }
             }
@@ -540,7 +510,10 @@ impl AIChat {
                         self.pending_tool_calls
                             .insert(call_id, (tool_name, initial_args));
                     }
-                    ChatResponseChunk::ToolCallDelta { call_id, args_delta } => {
+                    ChatResponseChunk::ToolCallDelta {
+                        call_id,
+                        args_delta,
+                    } => {
                         if let Some((_, args)) = self.pending_tool_calls.get_mut(&call_id) {
                             let prev = args.len();
                             args.push_str(&args_delta);
@@ -753,7 +726,7 @@ impl AIChat {
                 e.status,
                 ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Rejected
             )
-        }        )
+        })
     }
 
     /// Drain all entries from `pending_tool_calls` and turn them into
@@ -764,10 +737,12 @@ impl AIChat {
         }
 
         let count = self.pending_tool_calls.len();
-        eprintln!("[pgeru:ai] flush_pending_tool_calls: flushing {} pending call(s)", count);
+        eprintln!(
+            "[pgeru:ai] flush_pending_tool_calls: flushing {} pending call(s)",
+            count
+        );
 
-        let pending: HashMap<String, (String, String)> =
-            self.pending_tool_calls.drain().collect();
+        let pending: HashMap<String, (String, String)> = self.pending_tool_calls.drain().collect();
         let mut exec_tasks: Vec<Task<Message>> = Vec::new();
 
         for (call_id, (tool_name, args)) in pending {
@@ -886,8 +861,7 @@ impl AIChat {
         self.tool_call_entries.clear();
 
         let config = self.config.clone();
-        let messages: Vec<ChatMessage> =
-            self.messages.iter().map(|m| m.clone().into()).collect();
+        let messages: Vec<ChatMessage> = self.messages.iter().map(|m| m.clone().into()).collect();
         let tm = self.tool_manager.clone();
 
         eprintln!(
@@ -908,15 +882,13 @@ impl AIChat {
                                 Message::AIChat(AIChatMessage::ChunkReceived(chunk))
                             }
                         }
-                        Err(err) => {
-                            Message::AIChat(AIChatMessage::StreamError(err.to_string()))
-                        }
+                        Err(err) => Message::AIChat(AIChatMessage::StreamError(err.to_string())),
                     };
                     message
                 }),
-                Err(err) => Task::done(Message::AIChat(AIChatMessage::StreamError(
-                    err.to_string(),
-                ))),
+                Err(err) => {
+                    Task::done(Message::AIChat(AIChatMessage::StreamError(err.to_string())))
+                }
             }
         })
     }
