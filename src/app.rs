@@ -14,7 +14,7 @@ use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_tools::ToolManager;
-use crate::core::ai_client;
+use crate::core::agent_client;
 use crate::core::agent_config::AIConfig;
 use iced::Background;
 use iced::widget::pane_grid::{Highlight, Line, Style};
@@ -122,7 +122,7 @@ impl App {
                         config.connections,
                     ))),
                     Task::perform(
-                        async move { ai_client::list_models(&test_config).await },
+                        async move { agent_client::list_models(&test_config).await },
                         Message::TestAi,
                     ),
                 ])

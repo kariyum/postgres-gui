@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::app::Message;
 use crate::core::agent_tools::{ToolManager, needs_approval};
-use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk};
+use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_config::AIConfig;
 
 #[derive(Clone, Debug)]
@@ -422,7 +422,7 @@ impl AIChat {
 
                     self.stream_id = Some(Uuid::new_v4());
 
-                    Task::future(ai_client::prompt(self.config.clone(), messages, tm)).then(
+                    Task::future(agent_client::prompt(self.config.clone(), messages, tm)).then(
                         |request_result| match request_result {
                             Ok(stream) => Task::run(stream, |chat_response_chunk| {
                                 let message = match chat_response_chunk {
@@ -459,7 +459,7 @@ impl AIChat {
                         task = task.chain(self.flush_pending_tool_calls());
 
                         match msg {
-                            ai_client::ChatResponseMessage::Content(delta) => {
+                            agent_client::ChatResponseMessage::Content(delta) => {
                                 if let Some(last) = self.messages.last_mut()
                                     && let Role::Assistant = last.role
                                 {
@@ -479,7 +479,7 @@ impl AIChat {
                                     self.messages.push(ChatMsg::new(Role::Assistant, delta));
                                 }
                             }
-                            ai_client::ChatResponseMessage::Thinking(delta) => {
+                            agent_client::ChatResponseMessage::Thinking(delta) => {
                                 if let Some(last) = self.messages.last_mut()
                                     && let Role::Thinking = last.role
                                 {
@@ -870,7 +870,7 @@ impl AIChat {
 
         self.stream_id = Some(Uuid::new_v4());
 
-        Task::future(ai_client::prompt(config, messages, tm)).then(|request_result| {
+        Task::future(agent_client::prompt(config, messages, tm)).then(|request_result| {
             match request_result {
                 Ok(stream) => Task::run(stream, |chat_response_chunk| {
                     let message = match chat_response_chunk {
