@@ -3,7 +3,7 @@ use iced::{Color, Element, Length, Task, Theme};
 
 use crate::ai_config::AIConfig;
 use crate::app::Message;
-use crate::components::ai_settings_dialog::AiSettingsForm;
+use crate::components::settings_dialog::AiSettingsForm;
 use crate::core::provider::{OpenCode, Provider};
 use crate::theme;
 use crate::ui::input_field::{InputField, InputFieldMessage};

@@ -1,4 +1,4 @@
-pub mod ai_settings_dialog;
+pub mod settings_dialog;
 pub mod ai_chat;
 pub mod connection_dialog;
 pub mod connection_item;

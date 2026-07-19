@@ -8,7 +8,7 @@ use iced::{Subscription, mouse, window};
 
 use crate::ai_config::AIConfig;
 use crate::components::ai_chat::{AIChat, AIChatMessage};
-use crate::components::ai_settings_dialog::{SettingsDialog, SettingsMessage};
+use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
