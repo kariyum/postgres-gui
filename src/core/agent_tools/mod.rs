@@ -14,12 +14,12 @@ use sqlx::PgPool;
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::ToolSet;
 
-pub use describe_table::{DescribeTable, DescribeTableArgs};
+pub use describe_table::DescribeTable;
 pub use execute_sql::ExecuteSql;
-pub use explain_query::{ExplainQuery, ExplainQueryArgs};
-pub use list_schemas::{ListSchemas, ListSchemasArgs};
-pub use list_tables::{ListTables, ListTablesArgs};
-pub use show_table_stats::{ShowTableStats, ShowTableStatsArgs};
+pub use explain_query::ExplainQuery;
+pub use list_schemas::ListSchemas;
+pub use list_tables::ListTables;
+pub use show_table_stats::ShowTableStats;
 
 #[derive(Debug, Clone)]
 pub struct ToolError(pub String);

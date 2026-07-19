@@ -6,16 +6,16 @@ use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 
-use crate::ai_config::AIConfig;
 use crate::components::ai_chat::{AIChat, AIChatMessage};
-use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
+use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_tools::ToolManager;
 use crate::core::ai_client;
+use crate::core::agent_config::AIConfig;
 use iced::Background;
 use iced::widget::pane_grid::{Highlight, Line, Style};
 use iced_aw::drop_down;
@@ -562,7 +562,9 @@ impl App {
             if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
                 if let Some(pool) = item.pool.clone() {
                     self.ai_chat.set_tool_manager(ToolManager::new(pool));
-                    eprintln!("[pgeru:app] sync_ai_tools: created ToolManager for connection {active_id}");
+                    eprintln!(
+                        "[pgeru:app] sync_ai_tools: created ToolManager for connection {active_id}"
+                    );
                     return;
                 }
             }

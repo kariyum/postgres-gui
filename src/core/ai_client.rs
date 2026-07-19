@@ -17,7 +17,7 @@ use rig_core::streaming::{
 };
 
 use crate::core::agent_tools::ToolManager;
-use crate::{ai_config::AIConfig, components::ai_chat::Role};
+use crate::{components::ai_chat::Role, core::agent_config::AIConfig};
 
 pub async fn list_models(config: &AIConfig) -> Result<Vec<String>, String> {
     let base_url = {

@@ -1,9 +1,9 @@
 use iced::widget::{Column, button, column, container, row, rule, text};
 use iced::{Color, Element, Length, Task, Theme};
 
-use crate::ai_config::AIConfig;
 use crate::app::Message;
 use crate::components::provider_config::ProviderConfig;
+use crate::core::agent_config::AIConfig;
 use crate::theme;
 use crate::ui::input_field::{InputField, InputFieldMessage};
 

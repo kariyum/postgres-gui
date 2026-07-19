@@ -1,12 +1,9 @@
-use iced::widget::{Column, button, column, container, row, rule, text};
-use iced::{Color, Element, Length, Task, Theme};
+use iced::widget::{column, container, rule, text};
+use iced::{Element, Length};
 
-use crate::ai_config::AIConfig;
-use crate::app::Message;
 use crate::components::settings_dialog::AiSettingsForm;
 use crate::core::provider::{OpenCode, Provider};
-use crate::theme;
-use crate::ui::input_field::{InputField, InputFieldMessage};
+use crate::ui::input_field::InputFieldMessage;
 
 #[derive(Clone, Debug)]
 pub struct ProviderConfig {

@@ -1,4 +1,3 @@
-mod ai_config;
 mod app;
 mod components;
 mod connection_manager;

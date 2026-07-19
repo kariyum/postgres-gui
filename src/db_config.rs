@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai_config::AIConfig;
+use crate::core::agent_config::AIConfig;
 use crate::core::connection_config::ConnectionConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

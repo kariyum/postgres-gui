@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use iced::border::Radius;
-use iced::futures::{Stream, StreamExt};
-use iced::keyboard::key::{self, Named};
+use iced::keyboard::key::{self};
 use iced::widget::operation;
 use iced::widget::space::horizontal;
 use iced::widget::{
@@ -12,10 +11,10 @@ use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::ai_config::AIConfig;
 use crate::app::Message;
 use crate::core::agent_tools::{ToolManager, needs_approval};
-use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk, ChatResponseMessage};
+use crate::core::ai_client::{self, ChatMessage, ChatResponseChunk};
+use crate::core::agent_config::AIConfig;
 
 #[derive(Clone, Debug)]
 pub struct AIChat {
