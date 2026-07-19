@@ -76,12 +76,9 @@ impl InputField {
         .into()
     }
 
-    pub fn update(&mut self, message: InputFieldMessage) -> Task<InputFieldMessage> {
+    pub fn update(&mut self, message: InputFieldMessage) {
         match message {
-            InputFieldMessage::InputChanged(new_value) => {
-                self.value = new_value;
-                Task::none()
-            }
+            InputFieldMessage::InputChanged(new_value) => self.value = new_value,
         }
     }
 }

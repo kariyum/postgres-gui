@@ -8,7 +8,7 @@ use iced::{Subscription, mouse, window};
 
 use crate::ai_config::AIConfig;
 use crate::components::ai_chat::{AIChat, AIChatMessage};
-use crate::components::ai_settings_dialog::{AiSettingsDialog, AiSettingsMessage};
+use crate::components::ai_settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::sidebar::{self, SidebarMessage};
@@ -42,7 +42,7 @@ pub enum Message {
     WindowResized(window::Id),
     MaximizedQueried(bool),
     TestAi(Result<Vec<String>, String>),
-    AiSettings(AiSettingsMessage),
+    AiSettings(SettingsMessage),
     AIChat(AIChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
@@ -58,7 +58,7 @@ pub enum PaneKind {
 pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
-    pub ai_settings: AiSettingsDialog,
+    pub ai_settings: SettingsDialog,
     pub ai_config: AIConfig,
     pub ai_chat: AIChat,
     pub zoom_multiplier: u8,
@@ -76,7 +76,7 @@ impl Default for App {
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
-            ai_settings: AiSettingsDialog::default(),
+            ai_settings: SettingsDialog::default(),
             ai_config: AIConfig::default(),
             ai_chat: AIChat::default(),
             zoom_multiplier: 0,
@@ -191,9 +191,7 @@ impl App {
             }
             Message::OpenAiSettings => {
                 self.menu_open = false;
-                Task::done(Message::AiSettings(AiSettingsMessage::Open(
-                    self.ai_config.clone(),
-                )))
+                Task::done(Message::AiSettings(SettingsMessage::Open))
             }
             Message::WindowResized(id) => window::is_maximized(id).map(Message::MaximizedQueried),
             Message::MaximizedQueried(maximized) => {
@@ -210,13 +208,11 @@ impl App {
                     Task::none()
                 }
             },
-            Message::AiSettings(AiSettingsMessage::Saved(config)) => {
-                self.ai_config = config.clone();
-                self.ai_chat.set_config(config);
+            Message::AiSettings(SettingsMessage::Saved(config)) => {
                 self.pending_save = true;
                 Task::none()
             }
-            Message::AiSettings(msg) => self.ai_settings.update(msg).map(Message::AiSettings),
+            Message::AiSettings(msg) => self.ai_settings.update(msg),
             Message::AIChat(msg) => self.ai_chat.update(msg),
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);

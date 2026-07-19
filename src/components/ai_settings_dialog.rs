@@ -1,123 +1,106 @@
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{Column, button, column, container, row, rule, space, text};
 use iced::{Color, Element, Length, Task, Theme};
 
-use crate::ai_config::AIConfig;
-use crate::theme;
-use crate::ui::input_field::{InputField, InputFieldMessage};
+use crate::app::Message;
+use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
+use crate::ui::input_field::InputField;
 
 #[derive(Debug, Clone)]
-pub struct AiSettingsDialog {
+pub struct SettingsDialog {
     pub visible: bool,
-    pub form: AiSettingsForm,
-    pub error: Option<String>,
+    opencode_config: ProviderConfig,
+    anthropic_config: ProviderConfig,
 }
 
 #[derive(Debug, Clone)]
-pub enum AiSettingsMessage {
-    Open(AIConfig),
-    EndpointField(InputFieldMessage),
-    ApiKeyField(InputFieldMessage),
-    ModelField(InputFieldMessage),
+pub enum SettingsMessage {
+    Open,
+    OpenCodeConfigMessage(ProviderConfigMessage),
+    AnthropicConfigMessage(ProviderConfigMessage),
     Save,
     Close,
-    Saved(AIConfig),
+    Saved(ProviderConfig),
 }
 
 #[derive(Debug, Clone)]
 pub struct AiSettingsForm {
-    pub endpoint: InputField,
     pub api_key: InputField,
-    pub model: InputField,
 }
 
 impl AiSettingsForm {
-    fn new(config: &AIConfig) -> Self {
+    pub fn new(api_key: String) -> Self {
         Self {
-            endpoint: InputField::default()
-                .placeholder("https://ollama.com".into())
-                .label("Endpoint".into())
-                .value(config.endpoint.clone()),
-
             api_key: InputField::default()
-                .placeholder("API key (optional)".into())
+                .placeholder("API key".into())
                 .label("API Key".into())
-                .value(config.api_key.clone().unwrap_or_default())
+                .value(api_key)
                 .secure(true),
-
-            model: InputField::default()
-                .placeholder("gpt-oss:120b".into())
-                .label("Model".into())
-                .value(config.model.clone()),
-        }
-    }
-
-    fn to_config(&self) -> AIConfig {
-        let api_key = self.api_key.value.trim();
-        AIConfig {
-            endpoint: self.endpoint.value.trim().to_string(),
-            api_key: if api_key.is_empty() {
-                None
-            } else {
-                Some(api_key.to_string())
-            },
-            model: self.model.value.trim().to_string(),
-            tools_enabled: true,
         }
     }
 }
 
-impl Default for AiSettingsDialog {
+impl Default for SettingsDialog {
     fn default() -> Self {
         Self {
             visible: false,
-            form: AiSettingsForm::new(&AIConfig::default()),
-            error: None,
+            opencode_config: ProviderConfig::opencode(),
+            anthropic_config: ProviderConfig::anthropic(),
         }
     }
 }
 
-impl AiSettingsDialog {
-    pub fn view(&self) -> Option<Element<'_, AiSettingsMessage>> {
+impl SettingsDialog {
+    fn view_sidebar(&self) -> Element<'_, SettingsMessage> {
+        Column::from_iter(
+            vec![&self.opencode_config, &self.anthropic_config]
+                .iter()
+                .map(|item| text(item.provider.to_string()).size(12).into()),
+        )
+        .padding([8, 12])
+        .spacing(12)
+        .width(140)
+        .into()
+    }
+
+    pub fn view(&self) -> Option<Element<'_, SettingsMessage>> {
         if !self.visible {
             return None;
         }
 
-        let mut form = column![
-            text("AI Settings").size(18),
-            iced::widget::rule::horizontal(1),
-            self.form
-                .endpoint
-                .view()
-                .map(AiSettingsMessage::EndpointField),
-            self.form
-                .api_key
-                .view()
-                .map(AiSettingsMessage::ApiKeyField),
-            self.form
-                .model
-                .view()
-                .map(AiSettingsMessage::ModelField),
-        ]
-        .spacing(14)
-        .padding(24)
-        .width(Length::Fixed(440.0));
-
-        if let Some(ref err) = self.error {
-            form = form.push(text(err.as_str()).size(13).color(theme::DANGER));
-        }
-
-        let actions = row![
-            button(text("Cancel").size(14))
-                .on_press(AiSettingsMessage::Close)
-                .padding([8, 18])
-                .style(iced::widget::button::secondary),
-            button(text("Save").size(14))
-                .on_press(AiSettingsMessage::Save)
-                .padding([8, 18]),
-        ]
-        .spacing(10);
-
-        form = form.push(actions);
+        let form = column![
+            container("Settings").padding([8, 12]),
+            rule::horizontal(1),
+            row![
+                self.view_sidebar(),
+                rule::vertical(1),
+                column![
+                    self.opencode_config
+                        .view()
+                        .map(SettingsMessage::OpenCodeConfigMessage),
+                    self.anthropic_config
+                        .view()
+                        .map(SettingsMessage::AnthropicConfigMessage),
+                ]
+                .spacing(4)
+                .padding([8, 12])
+                .width(Length::Fill)
+            ],
+            rule::horizontal(1),
+            container(
+                row![
+                    space::horizontal(),
+                    button(text("Cancel").size(12))
+                        .on_press(SettingsMessage::Close)
+                        .padding([4, 8])
+                        .style(iced::widget::button::secondary),
+                    button(text("Save").size(12))
+                        .on_press(SettingsMessage::Save)
+                        .padding([4, 8]),
+                ]
+                .spacing(10)
+            )
+            .padding([8, 12])
+        ];
 
         Some(
             container(form)
@@ -128,7 +111,7 @@ impl AiSettingsDialog {
                         border: iced::Border {
                             color: palette.background.strong.color,
                             width: 1.0,
-                            radius: 10.0.into(),
+                            radius: 5.0.into(),
                         },
                         shadow: iced::Shadow {
                             color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
@@ -138,53 +121,34 @@ impl AiSettingsDialog {
                         ..Default::default()
                     }
                 })
+                .width(Length::Fixed(640.0))
+                .height(Length::Fixed(440.0))
                 .into(),
         )
     }
 
-    pub fn update(&mut self, message: AiSettingsMessage) -> Task<AiSettingsMessage> {
+    pub fn update(&mut self, message: SettingsMessage) -> Task<Message> {
         match message {
-            AiSettingsMessage::Open(config) => {
+            SettingsMessage::Open => {
                 self.visible = true;
-                self.error = None;
-                self.form = AiSettingsForm::new(&config);
                 Task::none()
             }
-            AiSettingsMessage::EndpointField(msg) => self
-                .form
-                .endpoint
-                .update(msg)
-                .map(AiSettingsMessage::EndpointField),
-            AiSettingsMessage::ApiKeyField(msg) => self
-                .form
-                .api_key
-                .update(msg)
-                .map(AiSettingsMessage::ApiKeyField),
-            AiSettingsMessage::ModelField(msg) => self
-                .form
-                .model
-                .update(msg)
-                .map(AiSettingsMessage::ModelField),
-            AiSettingsMessage::Save => {
-                if self.form.endpoint.value.trim().is_empty() {
-                    self.error = Some("Endpoint cannot be empty.".into());
-                    return Task::none();
-                }
-                if self.form.model.value.trim().is_empty() {
-                    self.error = Some("Model cannot be empty.".into());
-                    return Task::none();
-                }
-                let config = self.form.to_config();
-                self.visible = false;
-                self.error = None;
-                Task::done(AiSettingsMessage::Saved(config))
+            SettingsMessage::Save => {
+                todo!()
             }
-            AiSettingsMessage::Close => {
+            SettingsMessage::Close => {
                 self.visible = false;
-                self.error = None;
                 Task::none()
             }
-            AiSettingsMessage::Saved(_) => Task::none(),
+            SettingsMessage::Saved(_) => Task::none(),
+            SettingsMessage::OpenCodeConfigMessage(msg) => {
+                self.opencode_config.update(msg);
+                Task::none()
+            }
+            SettingsMessage::AnthropicConfigMessage(msg) => {
+                self.anthropic_config.update(msg);
+                Task::none()
+            }
         }
     }
 }

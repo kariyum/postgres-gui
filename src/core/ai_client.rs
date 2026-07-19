@@ -234,7 +234,6 @@ pub async fn prompt(
         }
     };
 
-    let model_name = config.model.clone();
     let mapped = stream.map(move |item| {
         item.map(|content| match content {
             StreamedAssistantContent::Text(text) => {
@@ -248,13 +247,6 @@ pub async fn prompt(
                     serde_json::Value::String(s) => s,
                     other => other.to_string(),
                 };
-                eprintln!(
-                    "[pgeru] prompt: [req_model={}] ToolCall name={} internal_id={} initial_args_len={}",
-                    model_name,
-                    tool_call.function.name,
-                    internal_call_id,
-                    initial_args.len()
-                );
                 ChatResponseChunk::ToolCallStarted {
                     call_id: internal_call_id,
                     tool_name: tool_call.function.name,
@@ -270,10 +262,6 @@ pub async fn prompt(
                     ToolCallDeltaContent::Name(n) => n,
                     ToolCallDeltaContent::Delta(d) => d,
                 };
-                eprintln!(
-                    "[pgeru] prompt: [req_model={}] ToolCallDelta id={} internal_id={} content_len={}",
-                    model_name, id, internal_call_id, delta_text.len()
-                );
                 ChatResponseChunk::ToolCallDelta {
                     call_id: internal_call_id,
                     args_delta: delta_text,
@@ -289,29 +277,15 @@ pub async fn prompt(
                         _ => "",
                     })
                     .collect();
-                eprintln!(
-                    "[pgeru] prompt: [req_model={}] Reasoning len={}",
-                    model_name,
-                    text.len()
-                );
                 ChatResponseChunk::Message(ChatResponseMessage::Thinking(text))
             }
 
             StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
-                eprintln!(
-                    "[pgeru] prompt: [req_model={}] chunk ReasoningDelta len={}",
-                    model_name,
-                    reasoning.len()
-                );
                 ChatResponseChunk::Message(ChatResponseMessage::Thinking(reasoning))
             }
 
             StreamedAssistantContent::Final(response) => {
                 let extra = serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
-                eprintln!(
-                    "[pgeru] prompt: [req_model={}] chunk Final response_json={}",
-                    model_name, extra
-                );
                 ChatResponseChunk::Done
             }
         })

@@ -223,36 +223,30 @@ impl ConnectionDialog {
 
     pub fn update(&mut self, message: DialogMessage) -> Task<DialogMessage> {
         match message {
-            DialogMessage::DialogNameField(msg) => self
-                .form
-                .name
-                .update(msg)
-                .map(DialogMessage::DialogNameField),
-            DialogMessage::DialogHostField(msg) => self
-                .form
-                .host
-                .update(msg)
-                .map(DialogMessage::DialogHostField),
-            DialogMessage::DialogPortField(msg) => self
-                .form
-                .port
-                .update(msg)
-                .map(DialogMessage::DialogPortField),
-            DialogMessage::DialogUserField(msg) => self
-                .form
-                .user
-                .update(msg)
-                .map(DialogMessage::DialogUserField),
-            DialogMessage::DialogPasswordField(msg) => self
-                .form
-                .password
-                .update(msg)
-                .map(DialogMessage::DialogPasswordField),
-            DialogMessage::DialogDatabaseField(msg) => self
-                .form
-                .database
-                .update(msg)
-                .map(DialogMessage::DialogDatabaseField),
+            DialogMessage::DialogNameField(msg) => {
+                self.form.name.update(msg);
+                Task::none()
+            }
+            DialogMessage::DialogHostField(msg) => {
+                self.form.host.update(msg);
+                Task::none()
+            }
+            DialogMessage::DialogPortField(msg) => {
+                self.form.port.update(msg);
+                Task::none()
+            }
+            DialogMessage::DialogUserField(msg) => {
+                self.form.user.update(msg);
+                Task::none()
+            }
+            DialogMessage::DialogPasswordField(msg) => {
+                self.form.password.update(msg);
+                Task::none()
+            }
+            DialogMessage::DialogDatabaseField(msg) => {
+                self.form.database.update(msg);
+                Task::none()
+            }
             DialogMessage::DialogSave => match self.build_config() {
                 Err(e) => {
                     self.error = Some(e);
