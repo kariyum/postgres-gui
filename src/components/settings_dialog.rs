@@ -19,15 +19,15 @@ pub enum SettingsMessage {
     AnthropicConfigMessage(ProviderConfigMessage),
     Save,
     Close,
-    Saved(ProviderConfig),
+    Saved,
 }
 
 #[derive(Debug, Clone)]
-pub struct AiSettingsForm {
+pub struct AgentSettingsForm {
     pub api_key: InputField,
 }
 
-impl AiSettingsForm {
+impl AgentSettingsForm {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key: InputField::default()
@@ -54,7 +54,7 @@ impl SettingsDialog {
         Column::from_iter(
             vec![&self.opencode_config, &self.anthropic_config]
                 .iter()
-                .map(|item| text(item.provider.to_string()).size(12).into()),
+                .map(|item| text(item.provider.label()).size(12).into()),
         )
         .padding([8, 12])
         .spacing(12)
@@ -133,14 +133,15 @@ impl SettingsDialog {
                 self.visible = true;
                 Task::none()
             }
-            SettingsMessage::Save => {
-                todo!()
-            }
+            SettingsMessage::Save => Task::done(Message::SaveConfig),
             SettingsMessage::Close => {
                 self.visible = false;
                 Task::none()
             }
-            SettingsMessage::Saved(_) => Task::none(),
+            SettingsMessage::Saved => {
+                self.visible = false;
+                Task::none()
+            }
             SettingsMessage::OpenCodeConfigMessage(msg) => {
                 self.opencode_config.update(msg);
                 Task::none()

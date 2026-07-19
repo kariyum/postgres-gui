@@ -1,14 +1,14 @@
 use iced::widget::{column, container, rule, text};
 use iced::{Element, Length};
 
-use crate::components::settings_dialog::AiSettingsForm;
+use crate::components::settings_dialog::AgentSettingsForm;
 use crate::core::provider::{OpenCode, Provider};
 use crate::ui::input_field::InputFieldMessage;
 
 #[derive(Clone, Debug)]
 pub struct ProviderConfig {
     pub provider: Provider,
-    form: AiSettingsForm,
+    form: AgentSettingsForm,
     error: Option<String>,
 }
 
@@ -21,7 +21,7 @@ impl ProviderConfig {
     pub fn opencode() -> Self {
         Self {
             provider: Provider::OpenCode(OpenCode::default()), // todo init with saved api_key
-            form: AiSettingsForm::new(OpenCode::default().api_key),
+            form: AgentSettingsForm::new(OpenCode::default().api_key.unwrap_or_default()),
             error: None,
         }
     }
@@ -29,9 +29,9 @@ impl ProviderConfig {
     pub fn anthropic() -> Self {
         Self {
             provider: Provider::Anthropic {
-                api_key: String::new(), // todo init with saved api_key
+                api_key: None, // todo init with saved api_key
             },
-            form: AiSettingsForm::new(String::default()),
+            form: AgentSettingsForm::new(String::default()),
             error: None,
         }
     }
@@ -40,7 +40,7 @@ impl ProviderConfig {
         container(
             column![
                 column![
-                    text(format!("{} Config", self.provider.to_string())).size(14),
+                    text(format!("{} Config", self.provider.label())).size(14),
                     rule::horizontal(1)
                 ],
                 self.form

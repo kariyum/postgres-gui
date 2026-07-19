@@ -1,21 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AIConfig {
-    pub endpoint: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    pub model: String,
-    pub tools_enabled: bool,
-}
+use crate::core::provider::Provider;
 
-impl Default for AIConfig {
-    fn default() -> Self {
-        Self {
-            endpoint: "https://ollama.com".into(),
-            api_key: None,
-            model: "gpt-oss:120b".into(),
-            tools_enabled: true,
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentConfig {
+    pub provider: Vec<Provider>,
 }

@@ -1,26 +1,14 @@
-use iced::widget::{Column, button, column, container, row, rule, text};
-use iced::{Color, Element, Length, Task, Theme};
+use serde::{Deserialize, Serialize};
 
-use crate::app::Message;
-use crate::components::provider_config::ProviderConfig;
-use crate::core::agent_config::AIConfig;
-use crate::theme;
-use crate::ui::input_field::{InputField, InputFieldMessage};
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum Provider {
     OpenCode(OpenCode),
-    Anthropic { api_key: String },
-}
-
-#[derive(Clone)]
-pub enum BaseProvider {
-    OpenCode,
-    Anthropic,
+    Anthropic { api_key: Option<String> },
 }
 
 impl Provider {
-    pub fn to_string(&self) -> String {
+    pub fn label(&self) -> String {
         match self {
             Provider::OpenCode(_) => String::from("OpenCode"),
             Provider::Anthropic { .. } => String::from("Anthropic"),
@@ -28,16 +16,16 @@ impl Provider {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpenCode {
-    pub api_key: String,
+    pub api_key: Option<String>,
     pub base_url: String,
 }
 
 impl Default for OpenCode {
     fn default() -> Self {
         Self {
-            api_key: String::default(),
+            api_key: None,
             base_url: String::from("https://opencode.ai/zen/v1"),
         }
     }

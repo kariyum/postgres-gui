@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Context;
 use iced::border::Radius;
 use iced::keyboard::key::{self};
 use iced::widget::operation;
@@ -12,9 +13,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::Message;
-use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
-use crate::core::agent_config::AIConfig;
+use crate::core::agent_config::AgentConfig;
+use crate::core::agent_tools::{ToolManager, needs_approval};
+use crate::core::configured_provider::ConfiguredProvider;
 
 #[derive(Clone, Debug)]
 pub struct AIChat {
@@ -22,12 +24,13 @@ pub struct AIChat {
     input: text_editor::Content,
     error: Option<String>,
     messages: Vec<ChatMsg>,
-    config: AIConfig,
+    config: Option<ConfiguredProvider>,
     stream_id: Option<Uuid>,
     auto_scroll: bool,
     tool_manager: ToolManager,
     pending_tool_calls: HashMap<String, (String, String)>,
     tool_call_entries: Vec<ToolCallEntry>,
+    chosen_model: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -289,12 +292,13 @@ impl Default for AIChat {
             input: text_editor::Content::default(),
             error: None,
             messages: Vec::new(),
-            config: AIConfig::default(),
+            config: None,
             stream_id: None,
             auto_scroll: true,
             tool_manager: ToolManager::without_db(),
             pending_tool_calls: HashMap::new(),
             tool_call_entries: Vec::new(),
+            chosen_model: None,
         }
     }
 }
@@ -422,28 +426,40 @@ impl AIChat {
 
                     self.stream_id = Some(Uuid::new_v4());
 
-                    Task::future(agent_client::prompt(self.config.clone(), messages, tm)).then(
-                        |request_result| match request_result {
-                            Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                                let message = match chat_response_chunk {
-                                    Ok(chunk) => {
-                                        if let ChatResponseChunk::Done = chunk {
-                                            Message::AIChat(AIChatMessage::StreamFinished)
-                                        } else {
-                                            Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                    let model = self.chosen_model.clone().or(self
+                        .config
+                        .clone()
+                        .map(|config| config.models.first().map(|s| s.clone()))
+                        .flatten());
+
+                    if let Some(config) = self.config.clone()
+                        && let Some(model) = model
+                    {
+                        Task::future(agent_client::prompt(config, model, messages, tm)).then(
+                            |request_result| match request_result {
+                                Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                                    let message = match chat_response_chunk {
+                                        Ok(chunk) => {
+                                            if let ChatResponseChunk::Done = chunk {
+                                                Message::AIChat(AIChatMessage::StreamFinished)
+                                            } else {
+                                                Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                                            }
                                         }
-                                    }
-                                    Err(err) => {
-                                        Message::AIChat(AIChatMessage::StreamError(err.to_string()))
-                                    }
-                                };
-                                message
-                            }),
-                            Err(err) => Task::done(Message::AIChat(AIChatMessage::StreamError(
-                                err.to_string(),
-                            ))),
-                        },
-                    )
+                                        Err(err) => Message::AIChat(AIChatMessage::StreamError(
+                                            err.to_string(),
+                                        )),
+                                    };
+                                    message
+                                }),
+                                Err(err) => Task::done(Message::AIChat(
+                                    AIChatMessage::StreamError(err.to_string()),
+                                )),
+                            },
+                        )
+                    } else {
+                        Task::none()
+                    }
                 } else {
                     Task::none()
                 }
@@ -708,10 +724,6 @@ impl AIChat {
         self.stream_id.is_some()
     }
 
-    pub fn set_config(&mut self, config: AIConfig) {
-        self.config = config;
-    }
-
     pub fn set_tool_manager(&mut self, tm: ToolManager) {
         self.tool_manager = tm;
     }
@@ -859,7 +871,6 @@ impl AIChat {
 
         self.tool_call_entries.clear();
 
-        let config = self.config.clone();
         let messages: Vec<ChatMessage> = self.messages.iter().map(|m| m.clone().into()).collect();
         let tm = self.tool_manager.clone();
 
@@ -870,25 +881,38 @@ impl AIChat {
 
         self.stream_id = Some(Uuid::new_v4());
 
-        Task::future(agent_client::prompt(config, messages, tm)).then(|request_result| {
-            match request_result {
-                Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                    let message = match chat_response_chunk {
-                        Ok(chunk) => {
-                            if let ChatResponseChunk::Done = chunk {
-                                Message::AIChat(AIChatMessage::StreamFinished)
-                            } else {
-                                Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+        let model = self.chosen_model.clone().or(self
+            .config
+            .clone()
+            .map(|config| config.models.first().map(|s| s.clone()))
+            .flatten());
+        if let Some(config) = self.config.clone()
+            && let Some(model) = model
+        {
+            Task::future(agent_client::prompt(config, model, messages, tm)).then(|request_result| {
+                match request_result {
+                    Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                        let message = match chat_response_chunk {
+                            Ok(chunk) => {
+                                if let ChatResponseChunk::Done = chunk {
+                                    Message::AIChat(AIChatMessage::StreamFinished)
+                                } else {
+                                    Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                                }
                             }
-                        }
-                        Err(err) => Message::AIChat(AIChatMessage::StreamError(err.to_string())),
-                    };
-                    message
-                }),
-                Err(err) => {
-                    Task::done(Message::AIChat(AIChatMessage::StreamError(err.to_string())))
+                            Err(err) => {
+                                Message::AIChat(AIChatMessage::StreamError(err.to_string()))
+                            }
+                        };
+                        message
+                    }),
+                    Err(err) => {
+                        Task::done(Message::AIChat(AIChatMessage::StreamError(err.to_string())))
+                    }
                 }
-            }
-        })
+            })
+        } else {
+            Task::none()
+        }
     }
 }

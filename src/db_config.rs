@@ -2,9 +2,10 @@ use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::core::agent_config::AIConfig;
+use crate::core::agent_config::AgentConfig;
 use crate::core::connection_config::ConnectionConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,7 +14,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub zoom_multiplier: u8,
     #[serde(default)]
-    pub ai: AIConfig,
+    pub agent_config: AgentConfig,
 }
 
 impl Default for AppConfig {
@@ -21,7 +22,7 @@ impl Default for AppConfig {
         Self {
             connections: Vec::new(),
             zoom_multiplier: 0,
-            ai: AIConfig::default(),
+            agent_config: AgentConfig::default(),
         }
     }
 }
@@ -31,7 +32,7 @@ pub fn config_path() -> Option<PathBuf> {
         .ok()
         .or_else(|| std::env::var("HOME").ok())
         .map(PathBuf::from);
-    home.map(|h| h.join(".config").join("pgeru").join("connections.json"))
+    home.map(|path| path.join(".config").join("pgeru").join("connections.json"))
 }
 
 pub fn load_config() -> AppConfig {
@@ -48,14 +49,13 @@ pub fn load_config() -> AppConfig {
     AppConfig::default()
 }
 
-pub fn save_config(config: &AppConfig) -> Result<(), String> {
-    let path = config_path().ok_or("Could not determine home directory")?;
+pub fn save_config(config: &AppConfig) -> anyhow::Result<()> {
+    let path = config_path().context("Could not determine home directory")?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {e}"))?;
+        fs::create_dir_all(parent).context("Failed to create directories")?;
     }
-    let file = File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
+    let file = File::create(&path).context("Failed to create file")?;
     let writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(writer, config)
-        .map_err(|e| format!("Failed to serialize config: {e}"))?;
+    serde_json::to_writer_pretty(writer, config).context("Failed to serialize config")?;
     Ok(())
 }

@@ -1,12 +1,7 @@
 use anyhow::Context;
-use iced::futures::{Stream, StreamExt, TryStreamExt};
+use iced::futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio_util::{
-    codec::{FramedRead, LinesCodec},
-    io::StreamReader,
-};
 
-use rig_core::OneOrMany;
 use rig_core::client::{CompletionClient, ModelListingClient};
 use rig_core::completion::message::{AssistantContent, UserContent};
 use rig_core::completion::{CompletionModel, CompletionRequest, Message};
@@ -15,32 +10,29 @@ use rig_core::providers::openai;
 use rig_core::streaming::{
     StreamedAssistantContent, StreamingCompletionResponse, ToolCallDeltaContent,
 };
+use rig_core::{OneOrMany, model::ModelList};
 
-use crate::core::agent_tools::ToolManager;
-use crate::{components::ai_chat::Role, core::agent_config::AIConfig};
+use crate::components::ai_chat::Role;
+use crate::core::{agent_tools::ToolManager, configured_provider::ConfiguredProvider};
 
-pub async fn list_models(config: &AIConfig) -> Result<Vec<String>, String> {
-    let base_url = {
-        let url = config.endpoint.trim_end_matches('/');
-        if url.contains("/v1") {
-            url.to_string()
-        } else {
-            format!("{url}/v1")
-        }
-    };
+pub async fn list_models(api_key: String, base_url: Option<String>) -> anyhow::Result<ModelList> {
+    let mut client = openai::Client::builder();
 
-    let client = openai::Client::builder()
-        .api_key(config.api_key.clone().unwrap_or_default())
-        .base_url(&base_url)
+    if let Some(base_url) = base_url {
+        client = client.base_url(base_url);
+    }
+
+    let built_client = client
+        .api_key(api_key)
         .build()
-        .map_err(|e| format!("Failed to build OpenAI client: {e}"))?;
+        .context("Failed to build OpenAI client: {e}")?;
 
-    let models = client
+    let models = built_client
         .list_models()
         .await
-        .map_err(|e| format!("Failed to list models: {e}"))?;
+        .context("Failed to list models: {e}")?;
 
-    Ok(models.iter().map(|m| m.id.clone()).collect())
+    Ok(models)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -106,45 +98,6 @@ impl From<ChatMessage> for Message {
     }
 }
 
-pub async fn prompt_ollama(
-    config: AIConfig,
-    prompt: Vec<ChatMessage>,
-) -> anyhow::Result<impl Stream<Item = anyhow::Result<ChatResponseChunk>>> {
-    let url = format!("{}/api/chat", config.endpoint);
-    let mut builder = reqwest::Client::new().post(&url);
-    if let Some(ref key) = config.api_key {
-        builder = builder.header("Authorization", format!("Bearer {key}"));
-    }
-    let body = ChatRequest {
-        model: config.model.to_string(),
-        messages: prompt,
-        stream: true,
-    };
-
-    let response = builder.json(&body).send().await?.error_for_status()?;
-    let stream = response
-        .bytes_stream()
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err));
-    let reader = StreamReader::new(stream);
-    let lines_stream = FramedRead::new(reader, LinesCodec::new());
-    let parsed_stream = lines_stream.filter_map(|line_result| async move {
-        match line_result {
-            Ok(line) => {
-                if line.trim().is_empty() {
-                    None
-                } else {
-                    Some(
-                        serde_json::from_str::<ChatResponseChunk>(&line)
-                            .context("Failed to parse model response chunk from stream"),
-                    )
-                }
-            }
-            Err(err) => Some(Err(err).context("Failed to read line from stream")),
-        }
-    });
-    Ok(parsed_stream)
-}
-
 fn build_preamble() -> String {
     format!("{} {}",
         "You are the core AI intelligence engine integrated into a native PostgreSQL GUI desktop client. Your primary objective is to assist developers and database administrators in safely writing, optimizing, and understanding PostgreSQL queries.
@@ -162,37 +115,26 @@ fn build_preamble() -> String {
 }
 
 pub async fn prompt(
-    config: AIConfig,
+    configured_provider: ConfiguredProvider,
+    model: String,
     prompt: Vec<ChatMessage>,
     tool_manager: ToolManager,
 ) -> anyhow::Result<impl Stream<Item = anyhow::Result<ChatResponseChunk>>> {
-    let api_key = config.api_key.clone().unwrap_or_default();
+    let mut client = openai::Client::builder();
 
-    let base_url = {
-        let url = config.endpoint.trim_end_matches('/');
-        if url.contains("/v1") {
-            url.to_string()
-        } else {
-            format!("{url}/v1")
-        }
-    };
-    eprintln!("[pgeru] prompt: base_url={}", base_url);
+    if let Some(ref base_url) = configured_provider.base_url {
+        client = client.base_url(base_url);
+    }
 
-    let client = openai::Client::builder()
-        .api_key(api_key)
-        .base_url(&base_url)
+    let built_client = client
+        .api_key(configured_provider.api_key)
         .build()
         .context("Failed to build OpenAI client")?
         .completions_api();
 
     eprintln!("[pgeru] prompt: openai client built");
 
-    let model = client.completion_model(&config.model);
-
-    eprintln!(
-        "[pgeru] prompt: completion model created for model={}",
-        config.model
-    );
+    let model = built_client.completion_model(&model);
 
     let messages: Vec<Message> = prompt.into_iter().map(|m| m.into()).collect();
     eprintln!(

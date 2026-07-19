@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use anyhow::{Context, anyhow};
 use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
@@ -13,9 +14,10 @@ use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
-use crate::core::agent_tools::ToolManager;
 use crate::core::agent_client;
-use crate::core::agent_config::AIConfig;
+use crate::core::agent_config::AgentConfig;
+use crate::core::agent_tools::ToolManager;
+use crate::db_config::{self, AppConfig};
 use iced::Background;
 use iced::widget::pane_grid::{Highlight, Line, Style};
 use iced_aw::drop_down;
@@ -27,7 +29,7 @@ pub enum Message {
     Close,
     Drag,
     DragResize(window::Direction),
-    ConfigLoaded(crate::db_config::AppConfig),
+    ConfigLoaded(AppConfig),
     SavePending,
     ToggleMaximize,
     PositionSaved(Option<Point>),
@@ -41,11 +43,11 @@ pub enum Message {
     AddConnection,
     WindowResized(window::Id),
     MaximizedQueried(bool),
-    TestAi(Result<Vec<String>, String>),
-    AiSettings(SettingsMessage),
+    AgentSettings(SettingsMessage),
     AIChat(AIChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
+    SaveConfig,
 }
 
 #[derive(Debug)]
@@ -59,7 +61,7 @@ pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
     pub ai_settings: SettingsDialog,
-    pub ai_config: AIConfig,
+    pub agent_config: AgentConfig,
     pub ai_chat: AIChat,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
@@ -77,7 +79,7 @@ impl Default for App {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
             ai_settings: SettingsDialog::default(),
-            ai_config: AIConfig::default(),
+            agent_config: AgentConfig::default(),
             ai_chat: AIChat::default(),
             zoom_multiplier: 0,
             is_maximized: false,
@@ -114,18 +116,10 @@ impl App {
 
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
-                self.ai_config = config.ai.clone();
-                self.ai_chat.set_config(config.ai);
-                let test_config = self.ai_config.clone();
-                Task::batch([
-                    Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
-                        config.connections,
-                    ))),
-                    Task::perform(
-                        async move { agent_client::list_models(&test_config).await },
-                        Message::TestAi,
-                    ),
-                ])
+                self.agent_config = config.agent_config.clone();
+                Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
+                    config.connections,
+                )))
             }
             Message::SavePending => {
                 if self.pending_save {
@@ -191,54 +185,46 @@ impl App {
             }
             Message::OpenAiSettings => {
                 self.menu_open = false;
-                Task::done(Message::AiSettings(SettingsMessage::Open))
+                Task::done(Message::AgentSettings(SettingsMessage::Open))
             }
             Message::WindowResized(id) => window::is_maximized(id).map(Message::MaximizedQueried),
             Message::MaximizedQueried(maximized) => {
                 self.is_maximized = maximized;
                 Task::none()
             }
-            Message::TestAi(result) => match result {
-                Ok(models) => {
-                    eprintln!("[AI] Available models: {models:?}");
-                    Task::none()
-                }
-                Err(e) => {
-                    eprintln!("[AI] Failed to list models: {e}");
-                    Task::none()
-                }
-            },
-            Message::AiSettings(SettingsMessage::Saved(config)) => {
-                self.pending_save = true;
-                Task::none()
-            }
-            Message::AiSettings(msg) => self.ai_settings.update(msg),
+            Message::AgentSettings(msg) => self.ai_settings.update(msg),
             Message::AIChat(msg) => self.ai_chat.update(msg),
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);
                 Task::none()
             }
+            Message::SaveConfig => self.save_config(),
         }
     }
 
     fn save_config(&self) -> Task<Message> {
-        let config = crate::db_config::AppConfig {
+        let config = AppConfig {
             connections: self.manager.items.iter().map(|i| i.cfg.clone()).collect(),
             zoom_multiplier: self.zoom_multiplier,
-            ai: self.ai_config.clone(),
+            agent_config: self.agent_config.clone(),
         };
         Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || crate::db_config::save_config(&config))
+                tokio::task::spawn_blocking(move || db_config::save_config(&config))
                     .await
-                    .unwrap_or(Err("Background task failed".to_string()))
+                    .context("Background task failed")
+                    .flatten()
             },
             |result| match result {
-                Ok(()) => Message::Noop,
-                Err(e) => {
-                    eprintln!("Failed to save config: {e}");
-                    Message::Noop
+                Ok(()) => {
+                    eprintln!("Saved..");
+                    Message::AgentSettings(SettingsMessage::Saved)
                 }
+                ,
+                Err(err) => {
+                    eprintln!("Got an error {}", err);
+                    Message::Noop
+                } // todo report saving error
             },
         )
     }
@@ -319,7 +305,7 @@ impl App {
         } else if let Some(dialog) = self.ai_settings.view() {
             iced::widget::stack![
                 layout,
-                container(dialog.map(Message::AiSettings))
+                container(dialog.map(Message::AgentSettings))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .align_x(iced::Alignment::Center)
@@ -571,5 +557,13 @@ impl App {
         }
         self.ai_chat.set_tool_manager(ToolManager::without_db());
         eprintln!("[pgeru:app] sync_ai_tools: no active pool, using ToolManager::without_db()");
+    }
+
+    pub fn agent_config(&self) -> &AgentConfig {
+        &self.agent_config
+    }
+
+    pub fn set_agent_config(&mut self, agent_config: AgentConfig) {
+        self.agent_config = agent_config;
     }
 }

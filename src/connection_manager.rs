@@ -1,3 +1,4 @@
+use anyhow::Context;
 use iced::Task;
 use sqlx::PgPool;
 
@@ -259,7 +260,9 @@ pub fn persist_connections(items: &[ConnectionItem]) -> Task<ConnManagerMessage>
                 crate::db_config::save_config(&config)
             })
             .await
-            .unwrap_or(Err("Background task failed".to_string()))
+            .context("Background task failed")
+            .flatten()
+            .map_err(|err| err.to_string())
         },
         ConnManagerMessage::ConnectionSaved,
     )
