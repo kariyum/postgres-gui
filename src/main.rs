@@ -3,7 +3,6 @@ mod components;
 mod connection_manager;
 mod core;
 mod db;
-mod db_config;
 mod theme;
 mod types;
 mod ui;
@@ -18,7 +17,7 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
     let app = app::App::default();
     let task = iced::Task::perform(
         async {
-            tokio::task::spawn_blocking(|| crate::db_config::load_config())
+            tokio::task::spawn_blocking(|| crate::core::config_loader::load_config())
                 .await
                 .unwrap_or_default()
         },

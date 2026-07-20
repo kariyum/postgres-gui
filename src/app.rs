@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
@@ -14,12 +14,9 @@ use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
-use crate::core::agent_client;
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::ToolManager;
-use crate::db_config::{self, AppConfig};
-use iced::Background;
-use iced::widget::pane_grid::{Highlight, Line, Style};
+use crate::core::config_loader::{self, AppConfig, save_config};
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -210,17 +207,13 @@ impl App {
         };
         Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || db_config::save_config(&config))
+                tokio::task::spawn_blocking(move || save_config(&config))
                     .await
                     .context("Background task failed")
                     .flatten()
             },
             |result| match result {
-                Ok(()) => {
-                    eprintln!("Saved..");
-                    Message::AgentSettings(SettingsMessage::Saved)
-                }
-                ,
+                Ok(()) => Message::AgentSettings(SettingsMessage::Saved),
                 Err(err) => {
                     eprintln!("Got an error {}", err);
                     Message::Noop
