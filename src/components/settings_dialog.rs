@@ -3,6 +3,8 @@ use iced::{Color, Element, Length, Task, Theme};
 
 use crate::app::Message;
 use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
+use crate::core::agent_config::AgentConfig;
+use crate::core::provider::Provider;
 use crate::ui::input_field::InputField;
 
 #[derive(Debug, Clone)]
@@ -17,6 +19,7 @@ pub enum SettingsMessage {
     Open,
     OpenCodeConfigMessage(ProviderConfigMessage),
     AnthropicConfigMessage(ProviderConfigMessage),
+    AgentConfig(AgentConfig),
     Save,
     Close,
     Saved,
@@ -133,7 +136,15 @@ impl SettingsDialog {
                 self.visible = true;
                 Task::none()
             }
-            SettingsMessage::Save => Task::done(Message::SaveConfig),
+            SettingsMessage::Save => {
+                let agent_config = AgentConfig {
+                    provider: vec![
+                        self.anthropic_config.updated_provider(),
+                        self.opencode_config.updated_provider(),
+                    ],
+                };
+                Task::done(Message::SaveAgentSettings(agent_config))
+            }
             SettingsMessage::Close => {
                 self.visible = false;
                 Task::none()
@@ -148,6 +159,19 @@ impl SettingsDialog {
             }
             SettingsMessage::AnthropicConfigMessage(msg) => {
                 self.anthropic_config.update(msg);
+                Task::none()
+            }
+            SettingsMessage::AgentConfig(agent_config) => {
+                eprintln!("Agent config loaded {:?}", agent_config);
+                for provider in agent_config.provider {
+                    if let Provider::Anthropic { .. } = &provider {
+                        self.anthropic_config
+                            .update(ProviderConfigMessage::InitConfig(provider));
+                    } else if let Provider::OpenCode(_) = &provider {
+                        self.opencode_config
+                            .update(ProviderConfigMessage::InitConfig(provider));
+                    }
+                }
                 Task::none()
             }
         }

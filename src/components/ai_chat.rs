@@ -432,6 +432,8 @@ impl AIChat {
                         .map(|config| config.models.first().map(|s| s.clone()))
                         .flatten());
 
+                    eprintln!("Model = {:?}, config = {:?}", model, self.config);
+
                     if let Some(config) = self.config.clone()
                         && let Some(model) = model
                     {
@@ -452,9 +454,12 @@ impl AIChat {
                                     };
                                     message
                                 }),
-                                Err(err) => Task::done(Message::AIChat(
-                                    AIChatMessage::StreamError(err.to_string()),
-                                )),
+                                Err(err) => {
+                                    eprintln!("Request failed with {err}");
+                                    Task::done(Message::AIChat(AIChatMessage::StreamError(
+                                        err.to_string(),
+                                    )))
+                                }
                             },
                         )
                     } else {

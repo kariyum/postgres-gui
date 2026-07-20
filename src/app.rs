@@ -40,11 +40,11 @@ pub enum Message {
     AddConnection,
     WindowResized(window::Id),
     MaximizedQueried(bool),
-    AgentSettings(SettingsMessage),
+    Settings(SettingsMessage),
     AIChat(AIChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
-    SaveConfig,
+    SaveAgentSettings(AgentConfig),
 }
 
 #[derive(Debug)]
@@ -114,9 +114,14 @@ impl App {
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
-                Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
-                    config.connections,
-                )))
+                Task::batch([
+                    Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
+                        config.connections,
+                    ))),
+                    Task::done(Message::Settings(SettingsMessage::AgentConfig(
+                        config.agent_config,
+                    ))),
+                ])
             }
             Message::SavePending => {
                 if self.pending_save {
@@ -182,20 +187,23 @@ impl App {
             }
             Message::OpenAiSettings => {
                 self.menu_open = false;
-                Task::done(Message::AgentSettings(SettingsMessage::Open))
+                Task::done(Message::Settings(SettingsMessage::Open))
             }
             Message::WindowResized(id) => window::is_maximized(id).map(Message::MaximizedQueried),
             Message::MaximizedQueried(maximized) => {
                 self.is_maximized = maximized;
                 Task::none()
             }
-            Message::AgentSettings(msg) => self.ai_settings.update(msg),
+            Message::Settings(msg) => self.ai_settings.update(msg),
             Message::AIChat(msg) => self.ai_chat.update(msg),
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);
                 Task::none()
             }
-            Message::SaveConfig => self.save_config(),
+            Message::SaveAgentSettings(agent_config) => {
+                self.agent_config = agent_config;
+                self.save_config()
+            }
         }
     }
 
@@ -207,13 +215,13 @@ impl App {
         };
         Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || save_config(&config))
+                tokio::task::spawn_blocking(move || config_loader::save_config(&config))
                     .await
                     .context("Background task failed")
                     .flatten()
             },
             |result| match result {
-                Ok(()) => Message::AgentSettings(SettingsMessage::Saved),
+                Ok(()) => Message::Settings(SettingsMessage::Saved),
                 Err(err) => {
                     eprintln!("Got an error {}", err);
                     Message::Noop
@@ -298,7 +306,7 @@ impl App {
         } else if let Some(dialog) = self.ai_settings.view() {
             iced::widget::stack![
                 layout,
-                container(dialog.map(Message::AgentSettings))
+                container(dialog.map(Message::Settings))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .align_x(iced::Alignment::Center)
@@ -550,13 +558,5 @@ impl App {
         }
         self.ai_chat.set_tool_manager(ToolManager::without_db());
         eprintln!("[pgeru:app] sync_ai_tools: no active pool, using ToolManager::without_db()");
-    }
-
-    pub fn agent_config(&self) -> &AgentConfig {
-        &self.agent_config
-    }
-
-    pub fn set_agent_config(&mut self, agent_config: AgentConfig) {
-        self.agent_config = agent_config;
     }
 }

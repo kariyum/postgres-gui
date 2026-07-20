@@ -9,6 +9,8 @@ mod ui;
 
 use iced::Size;
 
+use crate::core::config_loader;
+
 fn app_theme(_state: &app::App) -> iced::Theme {
     theme::create()
 }
@@ -17,7 +19,7 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
     let app = app::App::default();
     let task = iced::Task::perform(
         async {
-            tokio::task::spawn_blocking(|| crate::core::config_loader::load_config())
+            tokio::task::spawn_blocking(|| config_loader::load_config())
                 .await
                 .unwrap_or_default()
         },

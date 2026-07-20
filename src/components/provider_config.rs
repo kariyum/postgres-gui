@@ -1,5 +1,5 @@
 use iced::widget::{column, container, rule, text};
-use iced::{Element, Length};
+use iced::{Element, Length, Task};
 
 use crate::components::settings_dialog::AgentSettingsForm;
 use crate::core::provider::{OpenCode, Provider};
@@ -15,6 +15,7 @@ pub struct ProviderConfig {
 #[derive(Clone, Debug)]
 pub enum ProviderConfigMessage {
     ApiKeyField(InputFieldMessage),
+    InitConfig(Provider),
 }
 
 impl ProviderConfig {
@@ -60,6 +61,42 @@ impl ProviderConfig {
             ProviderConfigMessage::ApiKeyField(input_field_message) => {
                 self.form.api_key.update(input_field_message)
             }
+            ProviderConfigMessage::InitConfig(provider) => match (&provider, &self.provider) {
+                (
+                    Provider::OpenCode(OpenCode {
+                        api_key: Some(api_key),
+                        ..
+                    }),
+                    Provider::OpenCode(_),
+                ) => {
+                    self.form
+                        .api_key
+                        .update(InputFieldMessage::InputChanged(api_key.to_string()));
+                }
+                (
+                    Provider::Anthropic {
+                        api_key: Some(api_key),
+                    },
+                    Provider::Anthropic { .. },
+                ) => {
+                    self.form
+                        .api_key
+                        .update(InputFieldMessage::InputChanged(api_key.to_string()));
+                }
+                _ => (),
+            },
+        }
+    }
+
+    pub fn updated_provider(&self) -> Provider {
+        match &self.provider {
+            Provider::OpenCode(open_code) => Provider::OpenCode(OpenCode {
+                api_key: Some(self.form.api_key.value.clone()),
+                base_url: open_code.base_url.clone(),
+            }),
+            Provider::Anthropic { .. } => Provider::Anthropic {
+                api_key: Some(self.form.api_key.value.clone()),
+            },
         }
     }
 }

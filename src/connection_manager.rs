@@ -4,7 +4,7 @@ use sqlx::PgPool;
 
 use crate::components::connection_dialog::{self, DialogMessage};
 use crate::components::connection_item::{ConnectionItem, ItemMessage};
-use crate::core::config_loader::{load_config, save_config};
+use crate::core::config_loader::{self, load_config, save_config};
 use crate::core::connection_config::ConnectionConfig;
 use crate::db;
 
@@ -258,7 +258,7 @@ pub fn persist_connections(items: &[ConnectionItem]) -> Task<ConnManagerMessage>
             tokio::task::spawn_blocking(move || {
                 let mut config = load_config();
                 config.connections = configs;
-                save_config(&config)
+                config_loader::save_config(&config)
             })
             .await
             .context("Background task failed")
