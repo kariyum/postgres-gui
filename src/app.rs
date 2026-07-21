@@ -1,3 +1,4 @@
+use std::eprintln;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -6,6 +7,7 @@ use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
+use rig_core::model::ModelList;
 
 use crate::components::ai_chat::{AIChat, AIChatMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
@@ -17,6 +19,8 @@ use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::ToolManager;
 use crate::core::config_loader::{self, AppConfig, save_config};
+use crate::core::configured_provider::ConfiguredProvider;
+use crate::core::provider::Provider;
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -45,6 +49,8 @@ pub enum Message {
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
     SaveAgentSettings(AgentConfig),
+    LoadModels(Provider),
+    LoadedModels(Result<ModelList, String>),
 }
 
 #[derive(Debug)]
@@ -114,6 +120,7 @@ impl App {
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
+                eprintln!("agent_config is {:?}", self.agent_config);
                 Task::batch([
                     Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
                         config.connections,
@@ -121,6 +128,9 @@ impl App {
                     Task::done(Message::Settings(SettingsMessage::AgentConfig(
                         config.agent_config,
                     ))),
+                    Task::done(Message::LoadModels(
+                        self.agent_config.provider.last().unwrap().clone(),
+                    )),
                 ])
             }
             Message::SavePending => {
@@ -203,6 +213,15 @@ impl App {
             Message::SaveAgentSettings(agent_config) => {
                 self.agent_config = agent_config;
                 self.save_config()
+            }
+            Message::LoadModels(config) => {
+                Task::perform(async move { config.load_models().await }, |result| {
+                    Message::LoadedModels(result.map_err(|err| err.to_string()))
+                })
+            }
+            Message::LoadedModels(model_list) => {
+                eprintln!("Loaded models... {:?}", model_list);
+                Task::none()
             }
         }
     }

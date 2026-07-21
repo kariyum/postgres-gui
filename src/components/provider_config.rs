@@ -93,6 +93,7 @@ impl ProviderConfig {
             Provider::OpenCode(open_code) => Provider::OpenCode(OpenCode {
                 api_key: Some(self.form.api_key.value.clone()),
                 base_url: open_code.base_url.clone(),
+                models: open_code.models.clone()
             }),
             Provider::Anthropic { .. } => Provider::Anthropic {
                 api_key: Some(self.form.api_key.value.clone()),
