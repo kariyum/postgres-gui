@@ -4,7 +4,7 @@ use sqlx::PgPool;
 
 use crate::components::connection_dialog::{self, DialogMessage};
 use crate::components::connection_item::{ConnectionItem, ItemMessage};
-use crate::core::config_loader::{self, load_config, save_config};
+use crate::core::config_loader::{self, AppConfig, load_config, save_config};
 use crate::core::connection_config::ConnectionConfig;
 use crate::db;
 
@@ -168,7 +168,7 @@ impl ConnectionManager {
                 .find(|i| i.pool.is_some())
                 .map(|i| i.cfg.id.clone());
         }
-        persist_connections(&self.items)
+        persist_connections(AppConfig::default(), &self.items) // FIXME
     }
 
     fn handle_duplicate_requested(&mut self, id: &str) -> Task<ConnManagerMessage> {
@@ -177,7 +177,7 @@ impl ConnectionManager {
             new_cfg.id = uuid::Uuid::new_v4().to_string();
             new_cfg.name = format!("{} (copy)", new_cfg.name);
             self.items.push(ConnectionItem::new(new_cfg));
-            persist_connections(&self.items)
+            persist_connections(AppConfig::default(), &self.items) // FIXME
         } else {
             Task::none()
         }
@@ -232,7 +232,7 @@ impl ConnectionManager {
             let task = dialog.update(msg);
             Task::batch([
                 task.map(ConnManagerMessage::ConnectionDialogMessage),
-                persist_connections(&self.items),
+                persist_connections(AppConfig::default(), &self.items), // FIXME
             ])
         } else {
             let task = dialog.update(msg);
@@ -251,14 +251,19 @@ impl ConnectionManager {
     }
 }
 
-pub fn persist_connections(items: &[ConnectionItem]) -> Task<ConnManagerMessage> {
+pub fn persist_connections(
+    app_config: AppConfig,
+    items: &[ConnectionItem],
+) -> Task<ConnManagerMessage> {
     let configs: Vec<ConnectionConfig> = items.iter().map(|i| i.cfg.clone()).collect();
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                let mut config = load_config();
-                config.connections = configs;
-                config_loader::save_config(&config)
+                let updated_config = AppConfig {
+                    connections: configs,
+                    ..app_config
+                };
+                config_loader::save_config(&updated_config)
             })
             .await
             .context("Background task failed")

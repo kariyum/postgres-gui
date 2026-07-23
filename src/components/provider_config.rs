@@ -2,6 +2,7 @@ use iced::widget::{column, container, rule, text};
 use iced::{Element, Length, Task};
 
 use crate::components::settings_dialog::AgentSettingsForm;
+use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::provider::{OpenCode, Provider};
 use crate::ui::input_field::InputFieldMessage;
 
@@ -15,7 +16,7 @@ pub struct ProviderConfig {
 #[derive(Clone, Debug)]
 pub enum ProviderConfigMessage {
     ApiKeyField(InputFieldMessage),
-    InitConfig(Provider),
+    InitConfig(ConfiguredProvider),
 }
 
 impl ProviderConfig {
@@ -61,43 +62,31 @@ impl ProviderConfig {
             ProviderConfigMessage::ApiKeyField(input_field_message) => {
                 self.form.api_key.update(input_field_message)
             }
-            ProviderConfigMessage::InitConfig(provider) => match (&provider, &self.provider) {
-                (
-                    Provider::OpenCode(OpenCode {
-                        api_key: Some(api_key),
-                        ..
-                    }),
-                    Provider::OpenCode(_),
-                ) => {
-                    self.form
-                        .api_key
-                        .update(InputFieldMessage::InputChanged(api_key.to_string()));
-                }
-                (
-                    Provider::Anthropic {
-                        api_key: Some(api_key),
-                    },
-                    Provider::Anthropic { .. },
-                ) => {
-                    self.form
-                        .api_key
-                        .update(InputFieldMessage::InputChanged(api_key.to_string()));
-                }
-                _ => (),
-            },
+            ProviderConfigMessage::InitConfig(configured_provider) => {
+                self.form.api_key.update(InputFieldMessage::InputChanged(
+                    configured_provider.api_key.to_string(),
+                ));
+            }
         }
     }
 
-    pub fn updated_provider(&self) -> Provider {
+    pub fn updated_provider(&self) -> Option<ConfiguredProvider> {
+        if self.form.api_key.value.is_empty() {
+            return None;
+        }
         match &self.provider {
-            Provider::OpenCode(open_code) => Provider::OpenCode(OpenCode {
-                api_key: Some(self.form.api_key.value.clone()),
-                base_url: open_code.base_url.clone(),
-                models: open_code.models.clone()
+            Provider::OpenCode(open_code) => Some(ConfiguredProvider {
+                api_key: self.form.api_key.value.clone(),
+                base_url: Some(open_code.base_url.clone()),
+                default_model: None,
+                base_provider: BaseProvider::OpenCode,
             }),
-            Provider::Anthropic { .. } => Provider::Anthropic {
-                api_key: Some(self.form.api_key.value.clone()),
-            },
+            Provider::Anthropic { .. } => Some(ConfiguredProvider {
+                api_key: self.form.api_key.value.clone(),
+                base_url: None,
+                default_model: None,
+                base_provider: BaseProvider::Anthropic,
+            }),
         }
     }
 }

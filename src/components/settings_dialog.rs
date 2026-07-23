@@ -4,6 +4,7 @@ use iced::{Color, Element, Length, Task, Theme};
 use crate::app::Message;
 use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
 use crate::core::agent_config::AgentConfig;
+use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::provider::Provider;
 use crate::ui::input_field::InputField;
 
@@ -137,12 +138,14 @@ impl SettingsDialog {
                 Task::none()
             }
             SettingsMessage::Save => {
-                let agent_config = AgentConfig {
-                    provider: vec![
-                        self.anthropic_config.updated_provider(),
-                        self.opencode_config.updated_provider(),
-                    ],
-                };
+                let mut providers: Vec<ConfiguredProvider> = Vec::new();
+                if let Some(configured_provider) = self.anthropic_config.updated_provider() {
+                    providers.push(configured_provider);
+                }
+                if let Some(configured_provider) = self.opencode_config.updated_provider() {
+                    providers.push(configured_provider);
+                }
+                let agent_config = AgentConfig { providers };
                 Task::done(Message::SaveAgentSettings(agent_config))
             }
             SettingsMessage::Close => {
@@ -163,11 +166,11 @@ impl SettingsDialog {
             }
             SettingsMessage::AgentConfig(agent_config) => {
                 eprintln!("Agent config loaded {:?}", agent_config);
-                for provider in agent_config.provider {
-                    if let Provider::Anthropic { .. } = &provider {
+                for provider in agent_config.providers {
+                    if let BaseProvider::Anthropic = &provider.base_provider {
                         self.anthropic_config
                             .update(ProviderConfigMessage::InitConfig(provider));
-                    } else if let Provider::OpenCode(_) = &provider {
+                    } else if let BaseProvider::OpenCode = &provider.base_provider {
                         self.opencode_config
                             .update(ProviderConfigMessage::InitConfig(provider));
                     }

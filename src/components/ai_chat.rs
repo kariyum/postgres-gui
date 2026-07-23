@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::{format, matches};
 
 use anyhow::Context;
 use iced::border::Radius;
@@ -429,7 +430,7 @@ impl AIChat {
                     let model = self.chosen_model.clone().or(self
                         .config
                         .clone()
-                        .map(|config| config.models.first().map(|s| s.clone()))
+                        .map(|config| config.default_model)
                         .flatten());
 
                     eprintln!("Model = {:?}, config = {:?}", model, self.config);
@@ -889,7 +890,7 @@ impl AIChat {
         let model = self.chosen_model.clone().or(self
             .config
             .clone()
-            .map(|config| config.models.first().map(|s| s.clone()))
+            .map(|config| config.default_model)
             .flatten());
         if let Some(config) = self.config.clone()
             && let Some(model) = model

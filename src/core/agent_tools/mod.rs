@@ -5,7 +5,7 @@ mod list_schemas;
 mod list_tables;
 mod show_table_stats;
 
-use std::fmt;
+use std::{fmt, write};
 use std::sync::Arc;
 
 use serde_json::Value;

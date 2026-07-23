@@ -26,9 +26,7 @@ impl Provider {
             ..
         }) = self
         {
-            agent_client::list_models(api_key.to_string(), Some(base_url.to_string()))
-                .await
-                .context("Failed to fetch model list")
+            agent_client::list_models(api_key.to_string(), Some(base_url.to_string())).await
         } else {
             Err(anyhow::anyhow!("load_models not implemented for Anthropic"))
         }

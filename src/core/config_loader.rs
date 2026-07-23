@@ -35,18 +35,16 @@ pub fn config_path() -> Option<PathBuf> {
     home.map(|path| path.join(".config").join("pgeru").join("connections.json"))
 }
 
-pub fn load_config() -> AppConfig {
-    if let Some(path) = config_path() {
-        if path.exists() {
-            if let Ok(file) = File::open(&path) {
-                let reader = BufReader::new(file);
-                if let Ok(config) = serde_json::from_reader(reader) {
-                    return config;
-                }
-            }
-        }
+pub fn load_config() -> anyhow::Result<AppConfig> {
+    if let Some(path) = config_path()
+        && path.exists()
+    {
+        let file = File::open(&path).context("Failed to open file")?;
+        let reader = BufReader::new(file);
+        serde_json::from_reader(reader).context("Failed to deserialize")
+    } else {
+        Ok(AppConfig::default())
     }
-    AppConfig::default()
 }
 
 pub fn save_config(config: &AppConfig) -> anyhow::Result<()> {

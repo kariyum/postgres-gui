@@ -21,6 +21,7 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
         async {
             tokio::task::spawn_blocking(|| config_loader::load_config())
                 .await
+                .unwrap()
                 .unwrap_or_default()
         },
         |config| app::Message::ConfigLoaded(config),

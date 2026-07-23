@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::core::provider::Provider;
+use crate::core::{configured_provider::ConfiguredProvider, provider::Provider};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfig {
-    pub provider: Vec<Provider>,
+    pub providers: Vec<ConfiguredProvider>,
 }

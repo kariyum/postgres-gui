@@ -7,6 +7,7 @@ use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
+use log::info;
 use rig_core::model::ModelList;
 
 use crate::components::ai_chat::{AIChat, AIChatMessage};
@@ -120,7 +121,7 @@ impl App {
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
-                eprintln!("agent_config is {:?}", self.agent_config);
+                info!("agent_config is {:?}", self.agent_config);
                 Task::batch([
                     Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
                         config.connections,
@@ -128,9 +129,6 @@ impl App {
                     Task::done(Message::Settings(SettingsMessage::AgentConfig(
                         config.agent_config,
                     ))),
-                    Task::done(Message::LoadModels(
-                        self.agent_config.provider.last().unwrap().clone(),
-                    )),
                 ])
             }
             Message::SavePending => {

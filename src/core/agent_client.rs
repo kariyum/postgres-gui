@@ -1,3 +1,5 @@
+use std::format;
+
 use anyhow::Context;
 use iced::futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -163,18 +165,10 @@ pub async fn prompt(
     };
 
     eprintln!("[pgeru] prompt: calling model.stream()...");
-    let stream: StreamingCompletionResponse<_> = match model.stream(request).await {
-        Ok(s) => {
-            eprintln!("[pgeru] prompt: stream started successfully");
-            s
-        }
-        Err(err) => {
-            eprintln!("[pgeru] prompt: stream failed: {err}");
-            return Err(anyhow::anyhow!(
-                "Failed to start streaming completion: {err}"
-            ));
-        }
-    };
+    let stream: StreamingCompletionResponse<_> = model
+        .stream(request)
+        .await
+        .context("Failed to start streaming completion")?;
 
     let mapped = stream.map(move |item| {
         item.map(|content| match content {
