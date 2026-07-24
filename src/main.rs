@@ -8,8 +8,37 @@ mod types;
 mod ui;
 
 use iced::Size;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::core::config_loader;
+
+fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
+    let log_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("pgeru")
+        .join("logs");
+
+    let file_appender = tracing_appender::rolling::daily(log_dir, "app.log");
+
+    let (non_blocking_writer, guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking_writer)
+        .with_ansi(false);
+
+    let stdout_layer = tracing_subscriber::fmt::layer().pretty();
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,pgeru=debug"));
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
+
+    guard
+}
 
 fn app_theme(_state: &app::App) -> iced::Theme {
     theme::create()
@@ -30,6 +59,7 @@ fn app_init() -> (app::App, iced::Task<app::Message>) {
 }
 
 fn main() -> iced::Result {
+    let _guard = init_logging();
     iced::application(app_init, app::App::update, app::App::view)
         .title("Pgeru")
         .theme(app_theme)

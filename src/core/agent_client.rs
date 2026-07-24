@@ -13,8 +13,9 @@ use rig_core::streaming::{
     StreamedAssistantContent, StreamingCompletionResponse, ToolCallDeltaContent,
 };
 use rig_core::{OneOrMany, model::ModelList};
+use tracing::info;
 
-use crate::components::ai_chat::Role;
+use crate::components::agent_chat::Role;
 use crate::core::{agent_tools::ToolManager, configured_provider::ConfiguredProvider};
 
 pub async fn list_models(api_key: String, base_url: Option<String>) -> anyhow::Result<ModelList> {
@@ -134,13 +135,13 @@ pub async fn prompt(
         .context("Failed to build OpenAI client")?
         .completions_api();
 
-    eprintln!("[pgeru] prompt: openai client built");
+    info!("prompt: openai client built");
 
     let model = built_client.completion_model(&model);
 
     let messages: Vec<Message> = prompt.into_iter().map(|m| m.into()).collect();
-    eprintln!(
-        "[pgeru] prompt: converted {} messages to rig-core format",
+    info!(
+        "prompt: converted {} messages to rig-core format",
         messages.len()
     );
 
@@ -164,7 +165,7 @@ pub async fn prompt(
         output_schema: None,
     };
 
-    eprintln!("[pgeru] prompt: calling model.stream()...");
+    info!("prompt: calling model.stream()...");
     let stream: StreamingCompletionResponse<_> = model
         .stream(request)
         .await

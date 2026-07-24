@@ -4,9 +4,10 @@ mod explain_query;
 mod list_schemas;
 mod list_tables;
 mod show_table_stats;
+use tracing::info;
 
-use std::{fmt, write};
 use std::sync::Arc;
+use std::{fmt, write};
 
 use serde_json::Value;
 use sqlx::PgPool;
@@ -46,20 +47,18 @@ impl From<sqlx::Error> for ToolError {
 
 pub fn needs_approval(tool_name: &str, args_json: &str) -> bool {
     if tool_name != "execute_sql" {
-        eprintln!("[pgeru:tools] needs_approval({tool_name}): not execute_sql, no approval needed");
+        info!("needs_approval({tool_name}): not execute_sql, no approval needed");
         return false;
     }
     if let Ok(val) = serde_json::from_str::<Value>(args_json) {
         if let Some(sql) = val.get("sql").and_then(|v| v.as_str()) {
             let destructive = is_destructive(sql);
-            eprintln!(
-                "[pgeru:tools] needs_approval(execute_sql): sql={sql:?} destructive={destructive}"
-            );
+            info!("needs_approval(execute_sql): sql={sql:?} destructive={destructive}");
             return destructive;
         }
-        eprintln!("[pgeru:tools] needs_approval(execute_sql): no 'sql' field in args_json");
+        info!("needs_approval(execute_sql): no 'sql' field in args_json");
     } else {
-        eprintln!("[pgeru:tools] needs_approval: failed to parse args_json as JSON: {args_json}");
+        info!("needs_approval: failed to parse args_json as JSON: {args_json}");
     }
     false
 }
@@ -120,8 +119,8 @@ impl ToolManager {
     }
 
     pub async fn execute(&self, tool_name: &str, args_json: &str) -> Result<String, ToolError> {
-        eprintln!(
-            "[pgeru:tools] execute({tool_name}) starting, args_len={}",
+        info!(
+            "execute({tool_name}) starting, args_len={}",
             args_json.len()
         );
         let result = self
@@ -130,11 +129,8 @@ impl ToolManager {
             .await
             .map_err(|e| ToolError(e.to_string()));
         match &result {
-            Ok(out) => eprintln!(
-                "[pgeru:tools] execute({tool_name}) succeeded, output_len={}",
-                out.len()
-            ),
-            Err(e) => eprintln!("[pgeru:tools] execute({tool_name}) failed: {e}"),
+            Ok(out) => info!("execute({tool_name}) succeeded, output_len={}", out.len()),
+            Err(e) => info!("execute({tool_name}) failed: {e}"),
         }
         result
     }

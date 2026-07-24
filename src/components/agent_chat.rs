@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::{format, matches};
-
 use anyhow::Context;
 use iced::border::Radius;
 use iced::keyboard::key::{self};
@@ -11,6 +8,9 @@ use iced::widget::{
 };
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::{format, matches};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::app::Message;
@@ -20,7 +20,7 @@ use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
 
 #[derive(Clone, Debug)]
-pub struct AIChat {
+pub struct AgentChat {
     visible: bool,
     input: text_editor::Content,
     error: Option<String>,
@@ -154,8 +154,8 @@ impl ToolCallEntry {
         }
     }
 
-    fn view(&self) -> Element<'_, AIChatMessage> {
-        let mut children: Vec<Element<'_, AIChatMessage>> = vec![
+    fn view(&self) -> Element<'_, AgentChatMessage> {
+        let mut children: Vec<Element<'_, AgentChatMessage>> = vec![
             row![
                 text(format!("{} {}", self.icon(), self.tool_name)).size(13),
                 horizontal(),
@@ -221,7 +221,7 @@ impl ToolCallEntry {
                             .size(12)
                             .color(Color::from_rgb(0.2, 0.8, 0.2))
                     )
-                    .on_press(AIChatMessage::ApproveToolCall(self.call_id.clone()))
+                    .on_press(AgentChatMessage::ApproveToolCall(self.call_id.clone()))
                     .style(|_theme, _status| button::Style {
                         background: Some(Background::Color(Color::from_rgba(0.0, 0.3, 0.0, 0.3,))),
                         border: Border {
@@ -236,7 +236,7 @@ impl ToolCallEntry {
                             .size(12)
                             .color(Color::from_rgb(1.0, 0.3, 0.3))
                     )
-                    .on_press(AIChatMessage::RejectToolCall(self.call_id.clone()))
+                    .on_press(AgentChatMessage::RejectToolCall(self.call_id.clone()))
                     .style(|_theme, _status| button::Style {
                         background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.3,))),
                         border: Border {
@@ -269,7 +269,7 @@ impl ToolCallEntry {
 }
 
 #[derive(Clone, Debug)]
-pub enum AIChatMessage {
+pub enum AgentChatMessage {
     TogglePanel,
     EditorAction(text_editor::Action),
     Send,
@@ -286,7 +286,7 @@ pub enum AIChatMessage {
     },
 }
 
-impl Default for AIChat {
+impl Default for AgentChat {
     fn default() -> Self {
         Self {
             visible: false,
@@ -304,30 +304,30 @@ impl Default for AIChat {
     }
 }
 
-impl AIChat {
-    fn messages_view(&self) -> Element<'_, AIChatMessage> {
-        let msg_els: Vec<Element<'_, AIChatMessage>> = self
+impl AgentChat {
+    fn messages_view(&self) -> Element<'_, AgentChatMessage> {
+        let msg_els: Vec<Element<'_, AgentChatMessage>> = self
             .messages
             .iter()
-            .map(|msg| msg.view().map(AIChatMessage::MessageAction))
+            .map(|msg| msg.view().map(AgentChatMessage::MessageAction))
             .collect();
 
-        let tool_els: Vec<Element<'_, AIChatMessage>> = self
+        let tool_els: Vec<Element<'_, AgentChatMessage>> = self
             .tool_call_entries
             .iter()
             .map(|entry| entry.view())
             .collect();
 
-        let all: Vec<Element<'_, AIChatMessage>> = msg_els.into_iter().chain(tool_els).collect();
+        let all: Vec<Element<'_, AgentChatMessage>> = msg_els.into_iter().chain(tool_els).collect();
 
         scrollable(column(all))
             .id("chat_messages")
-            .on_scroll(AIChatMessage::UserScrolled)
+            .on_scroll(AgentChatMessage::UserScrolled)
             .height(Length::Fill)
             .into()
     }
 
-    fn actions_view(&self) -> Element<'_, AIChatMessage> {
+    fn actions_view(&self) -> Element<'_, AgentChatMessage> {
         container(row![
             horizontal(),
             button(
@@ -337,7 +337,7 @@ impl AIChat {
                 .height(14)
                 .width(14)
             )
-            .on_press(AIChatMessage::Send)
+            .on_press(AgentChatMessage::Send)
             .style(|_theme, _status| button::Style {
                 background: Some(iced::Background::Color(Color::TRANSPARENT)),
                 ..Default::default()
@@ -352,10 +352,10 @@ impl AIChat {
         .into()
     }
 
-    fn editor_view(&self) -> Element<'_, AIChatMessage> {
+    fn editor_view(&self) -> Element<'_, AgentChatMessage> {
         text_editor(&self.input)
             .placeholder("How many active users do I have?")
-            .on_action(AIChatMessage::EditorAction)
+            .on_action(AgentChatMessage::EditorAction)
             .id("ai_editor")
             .key_binding(|event| match (&event.key, &event.modifiers) {
                 (&keyboard::Key::Named(key::Named::Enter), &keyboard::Modifiers::SHIFT) => {
@@ -365,7 +365,7 @@ impl AIChat {
                     })
                 }
                 (&keyboard::Key::Named(key::Named::Enter), _) => {
-                    Some(text_editor::Binding::Custom(AIChatMessage::Send))
+                    Some(text_editor::Binding::Custom(AgentChatMessage::Send))
                 }
                 _ => text_editor::Binding::from_key_press(event),
             })
@@ -383,7 +383,7 @@ impl AIChat {
             .into()
     }
 
-    pub fn view(&self) -> Element<'_, AIChatMessage> {
+    pub fn view(&self) -> Element<'_, AgentChatMessage> {
         let layout = column![
             container(text("AI Chat").size(14)).padding([4.0, 8.0]),
             rule::horizontal(1.0),
@@ -398,20 +398,20 @@ impl AIChat {
             .into()
     }
 
-    pub fn update(&mut self, message: AIChatMessage) -> Task<Message> {
+    pub fn update(&mut self, message: AgentChatMessage) -> Task<Message> {
         match message {
-            AIChatMessage::TogglePanel => {
+            AgentChatMessage::TogglePanel => {
                 self.visible = !self.visible;
                 Task::none()
             }
-            AIChatMessage::EditorAction(action) => {
+            AgentChatMessage::EditorAction(action) => {
                 self.input.perform(action);
                 Task::none()
             }
-            AIChatMessage::Send => {
+            AgentChatMessage::Send => {
                 if !self.input.text().is_empty() && self.stream_id.is_none() {
                     let input = self.input.text();
-                    eprintln!("[pgeru:ai] Send: input_len={}, stream_id=None", input.len());
+                    info!("Send: input_len={}, stream_id=None", input.len());
 
                     self.messages.push(ChatMsg::new(Role::User, input));
                     self.input.perform(text_editor::Action::SelectAll);
@@ -433,7 +433,7 @@ impl AIChat {
                         .map(|config| config.default_model)
                         .flatten());
 
-                    eprintln!("Model = {:?}, config = {:?}", model, self.config);
+                    info!("Model = {:?}, config = {:?}", model, self.config);
 
                     if let Some(config) = self.config.clone()
                         && let Some(model) = model
@@ -444,20 +444,20 @@ impl AIChat {
                                     let message = match chat_response_chunk {
                                         Ok(chunk) => {
                                             if let ChatResponseChunk::Done = chunk {
-                                                Message::AIChat(AIChatMessage::StreamFinished)
+                                                Message::AIChat(AgentChatMessage::StreamFinished)
                                             } else {
-                                                Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                                                Message::AIChat(AgentChatMessage::ChunkReceived(chunk))
                                             }
                                         }
-                                        Err(err) => Message::AIChat(AIChatMessage::StreamError(
+                                        Err(err) => Message::AIChat(AgentChatMessage::StreamError(
                                             err.to_string(),
                                         )),
                                     };
                                     message
                                 }),
                                 Err(err) => {
-                                    eprintln!("Request failed with {err}");
-                                    Task::done(Message::AIChat(AIChatMessage::StreamError(
+                                    info!("Request failed with {err}");
+                                    Task::done(Message::AIChat(AgentChatMessage::StreamError(
                                         err.to_string(),
                                     )))
                                 }
@@ -470,8 +470,8 @@ impl AIChat {
                     Task::none()
                 }
             }
-            AIChatMessage::MessageAction(_) => Task::none(),
-            AIChatMessage::ChunkReceived(chunk) => {
+            AgentChatMessage::MessageAction(_) => Task::none(),
+            AgentChatMessage::ChunkReceived(chunk) => {
                 let mut task = Task::none();
 
                 match chunk {
@@ -488,14 +488,14 @@ impl AIChat {
                                     let prev = last.content.len();
                                     last.content.push_str(&delta);
                                     last.markdown_content.push_str(&delta);
-                                    eprintln!(
-                                        "[pgeru:ai] chunk Content: delta_len={}, total_len={}",
+                                    info!(
+                                        "chunk Content: delta_len={}, total_len={}",
                                         delta.len(),
                                         last.content.len()
                                     );
                                 } else {
-                                    eprintln!(
-                                        "[pgeru:ai] chunk Content (new msg): delta_len={}",
+                                    info!(
+                                        "chunk Content (new msg): delta_len={}",
                                         delta.len()
                                     );
                                     self.messages.push(ChatMsg::new(Role::Assistant, delta));
@@ -507,8 +507,8 @@ impl AIChat {
                                 {
                                     last.markdown_content.push_str(&delta);
                                 } else {
-                                    eprintln!(
-                                        "[pgeru:ai] chunk Thinking: delta_len={}",
+                                    info!(
+                                        "chunk Thinking: delta_len={}",
                                         delta.len()
                                     );
                                     self.messages.push(ChatMsg::new(Role::Thinking, delta));
@@ -522,8 +522,8 @@ impl AIChat {
                         tool_name,
                         initial_args,
                     } => {
-                        eprintln!(
-                            "[pgeru:ai] ToolCallStarted: call_id={}, tool_name={}, initial_args_len={}",
+                        info!(
+                            "ToolCallStarted: call_id={}, tool_name={}, initial_args_len={}",
                             call_id,
                             tool_name,
                             initial_args.len()
@@ -538,15 +538,15 @@ impl AIChat {
                         if let Some((_, args)) = self.pending_tool_calls.get_mut(&call_id) {
                             let prev = args.len();
                             args.push_str(&args_delta);
-                            eprintln!(
-                                "[pgeru:ai] ToolCallDelta: call_id={}, delta_len={}, total_len={}",
+                            info!(
+                                "ToolCallDelta: call_id={}, delta_len={}, total_len={}",
                                 call_id,
                                 args_delta.len(),
                                 args.len()
                             );
                         } else {
-                            eprintln!(
-                                "[pgeru:ai] ToolCallDelta: call_id={} NOT FOUND in pending",
+                            info!(
+                                "ToolCallDelta: call_id={} NOT FOUND in pending",
                                 call_id
                             );
                         }
@@ -559,8 +559,8 @@ impl AIChat {
                         self.pending_tool_calls.remove(&call_id);
 
                         let needs_approval = needs_approval(&tool_name, &args);
-                        eprintln!(
-                            "[pgeru:ai] ToolCallComplete: call_id={}, tool_name={}, args_len={}, needs_approval={}",
+                        info!(
+                            "ToolCallComplete: call_id={}, tool_name={}, args_len={}, needs_approval={}",
                             call_id,
                             tool_name,
                             args.len(),
@@ -582,29 +582,29 @@ impl AIChat {
                         });
 
                         if !needs_approval {
-                            eprintln!(
-                                "[pgeru:ai] ToolCallComplete: auto-executing {} (call_id={})",
+                            info!(
+                                "ToolCallComplete: auto-executing {} (call_id={})",
                                 tool_name, call_id
                             );
                             let tm = self.tool_manager.clone();
                             task = Task::perform(
                                 async move { tm.execute(&tool_name, &args).await },
                                 move |result| {
-                                    Message::AIChat(AIChatMessage::ToolExecutionResult {
+                                    Message::AIChat(AgentChatMessage::ToolExecutionResult {
                                         call_id,
                                         result: result.map_err(|e| e.0),
                                     })
                                 },
                             );
                         } else {
-                            eprintln!(
-                                "[pgeru:ai] ToolCallComplete: needs approval for {} (call_id={})",
+                            info!(
+                                "ToolCallComplete: needs approval for {} (call_id={})",
                                 tool_name, call_id
                             );
                         }
                     }
                     ChatResponseChunk::Done => {
-                        eprintln!("[pgeru:ai] chunk Done (unexpected in ChunkReceived)");
+                        info!("chunk Done (unexpected in ChunkReceived)");
                     }
                 }
 
@@ -616,8 +616,8 @@ impl AIChat {
 
                 task
             }
-            AIChatMessage::ApproveToolCall(call_id) => {
-                eprintln!("[pgeru:ai] ApproveToolCall: call_id={}", call_id);
+            AgentChatMessage::ApproveToolCall(call_id) => {
+                info!("ApproveToolCall: call_id={}", call_id);
                 if let Some(entry) = self
                     .tool_call_entries
                     .iter_mut()
@@ -627,56 +627,56 @@ impl AIChat {
                     let tool_name = entry.tool_name.clone();
                     let args = entry.args.clone();
                     let tm = self.tool_manager.clone();
-                    eprintln!(
-                        "[pgeru:ai] ApproveToolCall: executing {} (call_id={})",
+                    info!(
+                        "ApproveToolCall: executing {} (call_id={})",
                         tool_name, call_id
                     );
                     Task::perform(
                         async move { tm.execute(&tool_name, &args).await },
                         move |result| {
-                            Message::AIChat(AIChatMessage::ToolExecutionResult {
+                            Message::AIChat(AgentChatMessage::ToolExecutionResult {
                                 call_id,
                                 result: result.map_err(|e| e.0),
                             })
                         },
                     )
                 } else {
-                    eprintln!(
-                        "[pgeru:ai] ApproveToolCall: call_id={} NOT FOUND in entries",
+                    info!(
+                        "ApproveToolCall: call_id={} NOT FOUND in entries",
                         call_id
                     );
                     Task::none()
                 }
             }
-            AIChatMessage::RejectToolCall(call_id) => {
-                eprintln!("[pgeru:ai] RejectToolCall: call_id={}", call_id);
+            AgentChatMessage::RejectToolCall(call_id) => {
+                info!("RejectToolCall: call_id={}", call_id);
                 if let Some(entry) = self
                     .tool_call_entries
                     .iter_mut()
                     .find(|e| e.call_id == call_id)
                 {
                     entry.status = ToolCallStatus::Rejected;
-                    eprintln!(
-                        "[pgeru:ai] RejectToolCall: rejected {} (call_id={})",
+                    info!(
+                        "RejectToolCall: rejected {} (call_id={})",
                         entry.tool_name, call_id
                     );
                 } else {
-                    eprintln!(
-                        "[pgeru:ai] RejectToolCall: call_id={} NOT FOUND in entries",
+                    info!(
+                        "RejectToolCall: call_id={} NOT FOUND in entries",
                         call_id
                     );
                 }
                 self.maybe_re_prompt()
             }
-            AIChatMessage::ToolExecutionResult { call_id, result } => {
+            AgentChatMessage::ToolExecutionResult { call_id, result } => {
                 match &result {
-                    Ok(data) => eprintln!(
-                        "[pgeru:ai] ToolExecutionResult: call_id={}, ok, data_len={}",
+                    Ok(data) => info!(
+                        "ToolExecutionResult: call_id={}, ok, data_len={}",
                         call_id,
                         data.len()
                     ),
-                    Err(err) => eprintln!(
-                        "[pgeru:ai] ToolExecutionResult: call_id={}, error={}",
+                    Err(err) => info!(
+                        "ToolExecutionResult: call_id={}, error={}",
                         call_id, err
                     ),
                 }
@@ -696,26 +696,26 @@ impl AIChat {
                         }
                     }
                 } else {
-                    eprintln!(
-                        "[pgeru:ai] ToolExecutionResult: call_id={} NOT FOUND in entries",
+                    info!(
+                        "ToolExecutionResult: call_id={} NOT FOUND in entries",
                         call_id
                     );
                 }
                 self.maybe_re_prompt()
             }
-            AIChatMessage::StreamError(err) => {
-                eprintln!("[pgeru:ai] StreamError: {}", err);
+            AgentChatMessage::StreamError(err) => {
+                info!("StreamError: {}", err);
                 self.error = Some(err);
                 self.stream_id = None;
                 Task::none()
             }
-            AIChatMessage::StreamFinished => {
-                eprintln!("[pgeru:ai] StreamFinished");
+            AgentChatMessage::StreamFinished => {
+                info!("StreamFinished");
                 self.stream_id = None;
                 let flush = self.flush_pending_tool_calls();
                 self.maybe_re_prompt().chain(flush)
             }
-            AIChatMessage::UserScrolled(viewport) => {
+            AgentChatMessage::UserScrolled(viewport) => {
                 let offset = viewport.absolute_offset();
                 let content = viewport.content_bounds();
                 let visible = viewport.bounds();
@@ -754,8 +754,8 @@ impl AIChat {
         }
 
         let count = self.pending_tool_calls.len();
-        eprintln!(
-            "[pgeru:ai] flush_pending_tool_calls: flushing {} pending call(s)",
+        info!(
+            "flush_pending_tool_calls: flushing {} pending call(s)",
             count
         );
 
@@ -764,9 +764,7 @@ impl AIChat {
 
         for (call_id, (tool_name, args)) in pending {
             if args.is_empty() {
-                eprintln!(
-                    "[pgeru:ai] flush_pending: skipping {tool_name} ({call_id}) with empty args"
-                );
+                info!("flush_pending: skipping {tool_name} ({call_id}) with empty args");
                 continue;
             }
 
@@ -777,8 +775,8 @@ impl AIChat {
                 ToolCallStatus::Running
             };
 
-            eprintln!(
-                "[pgeru:ai] flush_pending: {} ({call_id}) needs_approval={}",
+            info!(
+                "flush_pending: {} ({call_id}) needs_approval={}",
                 tool_name, needs_approval
             );
 
@@ -796,7 +794,7 @@ impl AIChat {
                 exec_tasks.push(Task::perform(
                     async move { tm.execute(&tool_name, &args).await },
                     move |result| {
-                        Message::AIChat(AIChatMessage::ToolExecutionResult {
+                        Message::AIChat(AgentChatMessage::ToolExecutionResult {
                             call_id,
                             result: result.map_err(|e| e.0),
                         })
@@ -814,7 +812,7 @@ impl AIChat {
 
     fn maybe_re_prompt(&mut self) -> Task<Message> {
         if self.stream_id.is_some() {
-            eprintln!("[pgeru:ai] maybe_re_prompt: skipped (stream active)");
+            info!("maybe_re_prompt: skipped (stream active)");
             return Task::none();
         }
         if !self.all_tool_calls_complete() {
@@ -831,16 +829,16 @@ impl AIChat {
                 })
                 .map(|e| e.tool_name.as_str())
                 .collect();
-            eprintln!(
-                "[pgeru:ai] maybe_re_prompt: skipped (pending tool calls: {:?})",
+            info!(
+                "maybe_re_prompt: skipped (pending tool calls: {:?})",
                 pending
             );
             return Task::none();
         }
 
         let entry_count = self.tool_call_entries.len();
-        eprintln!(
-            "[pgeru:ai] maybe_re_prompt: injecting {} tool result(s) and re-prompting",
+        info!(
+            "maybe_re_prompt: injecting {} tool result(s) and re-prompting",
             entry_count
         );
 
@@ -867,8 +865,8 @@ impl AIChat {
                     }
                 },
             };
-            eprintln!(
-                "[pgeru:ai] maybe_re_prompt: injecting tool msg for {} (len={})",
+            info!(
+                "maybe_re_prompt: injecting tool msg for {} (len={})",
                 entry.tool_name,
                 content.len()
             );
@@ -880,8 +878,8 @@ impl AIChat {
         let messages: Vec<ChatMessage> = self.messages.iter().map(|m| m.clone().into()).collect();
         let tm = self.tool_manager.clone();
 
-        eprintln!(
-            "[pgeru:ai] maybe_re_prompt: starting new stream with {} messages",
+        info!(
+            "maybe_re_prompt: starting new stream with {} messages",
             messages.len()
         );
 
@@ -901,19 +899,19 @@ impl AIChat {
                         let message = match chat_response_chunk {
                             Ok(chunk) => {
                                 if let ChatResponseChunk::Done = chunk {
-                                    Message::AIChat(AIChatMessage::StreamFinished)
+                                    Message::AIChat(AgentChatMessage::StreamFinished)
                                 } else {
-                                    Message::AIChat(AIChatMessage::ChunkReceived(chunk))
+                                    Message::AIChat(AgentChatMessage::ChunkReceived(chunk))
                                 }
                             }
                             Err(err) => {
-                                Message::AIChat(AIChatMessage::StreamError(err.to_string()))
+                                Message::AIChat(AgentChatMessage::StreamError(err.to_string()))
                             }
                         };
                         message
                     }),
                     Err(err) => {
-                        Task::done(Message::AIChat(AIChatMessage::StreamError(err.to_string())))
+                        Task::done(Message::AIChat(AgentChatMessage::StreamError(err.to_string())))
                     }
                 }
             })

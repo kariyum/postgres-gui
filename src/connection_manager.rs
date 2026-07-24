@@ -1,6 +1,7 @@
 use anyhow::Context;
 use iced::Task;
 use sqlx::PgPool;
+use tracing::error;
 
 use crate::components::connection_dialog::{self, DialogMessage};
 use crate::components::connection_item::{ConnectionItem, ItemMessage};
@@ -56,7 +57,7 @@ impl ConnectionManager {
             ),
 
             ConnManagerMessage::ConnectionSaved(Err(e)) => {
-                eprintln!("Failed to save connection: {e}");
+                error!("Failed to save connection: {e}");
                 Task::none()
             }
 

@@ -7,10 +7,10 @@ use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
-use log::info;
 use rig_core::model::ModelList;
+use tracing::{error, info};
 
-use crate::components::ai_chat::{AIChat, AIChatMessage};
+use crate::components::agent_chat::{AgentChat, AgentChatMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
@@ -46,7 +46,7 @@ pub enum Message {
     WindowResized(window::Id),
     MaximizedQueried(bool),
     Settings(SettingsMessage),
-    AIChat(AIChatMessage),
+    AIChat(AgentChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
     SaveAgentSettings(AgentConfig),
@@ -64,9 +64,9 @@ pub enum PaneKind {
 pub struct App {
     pub manager: ConnectionManager,
     pub dialog: ConnectionDialog,
-    pub ai_settings: SettingsDialog,
+    pub settings: SettingsDialog,
     pub agent_config: AgentConfig,
-    pub ai_chat: AIChat,
+    pub ai_chat: AgentChat,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
@@ -82,9 +82,9 @@ impl Default for App {
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
-            ai_settings: SettingsDialog::default(),
+            settings: SettingsDialog::default(),
             agent_config: AgentConfig::default(),
-            ai_chat: AIChat::default(),
+            ai_chat: AgentChat::default(),
             zoom_multiplier: 0,
             is_maximized: false,
             saved_position: None,
@@ -202,7 +202,7 @@ impl App {
                 self.is_maximized = maximized;
                 Task::none()
             }
-            Message::Settings(msg) => self.ai_settings.update(msg),
+            Message::Settings(msg) => self.settings.update(msg),
             Message::AIChat(msg) => self.ai_chat.update(msg),
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);
@@ -218,7 +218,7 @@ impl App {
                 })
             }
             Message::LoadedModels(model_list) => {
-                eprintln!("Loaded models... {:?}", model_list);
+                info!("Loaded models... {:?}", model_list);
                 Task::none()
             }
         }
@@ -240,7 +240,7 @@ impl App {
             |result| match result {
                 Ok(()) => Message::Settings(SettingsMessage::Saved),
                 Err(err) => {
-                    eprintln!("Got an error {}", err);
+                    error!("Got an error {}", err);
                     Message::Noop
                 } // todo report saving error
             },
@@ -320,7 +320,7 @@ impl App {
                 }),
             ]
             .into()
-        } else if let Some(dialog) = self.ai_settings.view() {
+        } else if let Some(dialog) = self.settings.view() {
             iced::widget::stack![
                 layout,
                 container(dialog.map(Message::Settings))
@@ -566,14 +566,12 @@ impl App {
             if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
                 if let Some(pool) = item.pool.clone() {
                     self.ai_chat.set_tool_manager(ToolManager::new(pool));
-                    eprintln!(
-                        "[pgeru:app] sync_ai_tools: created ToolManager for connection {active_id}"
-                    );
+                    info!("sync_ai_tools: created ToolManager for connection {active_id}");
                     return;
                 }
             }
         }
         self.ai_chat.set_tool_manager(ToolManager::without_db());
-        eprintln!("[pgeru:app] sync_ai_tools: no active pool, using ToolManager::without_db()");
+        info!("sync_ai_tools: no active pool, using ToolManager::without_db()");
     }
 }

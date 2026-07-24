@@ -1,5 +1,6 @@
 use iced::widget::{Column, button, column, container, row, rule, space, text};
 use iced::{Color, Element, Length, Task, Theme};
+use tracing::info;
 
 use crate::app::Message;
 use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
@@ -165,7 +166,7 @@ impl SettingsDialog {
                 Task::none()
             }
             SettingsMessage::AgentConfig(agent_config) => {
-                eprintln!("Agent config loaded {:?}", agent_config);
+                info!("Agent config loaded {:?}", agent_config);
                 for provider in agent_config.providers {
                     if let BaseProvider::Anthropic = &provider.base_provider {
                         self.anthropic_config
