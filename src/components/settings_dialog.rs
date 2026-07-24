@@ -138,15 +138,15 @@ impl SettingsDialog {
                 Task::none()
             }
             SettingsMessage::Save => {
-                let mut providers: Vec<ConfiguredProvider> = Vec::new();
-                if let Some(configured_provider) = self.anthropic_config.updated_provider() {
-                    providers.push(configured_provider);
-                }
-                if let Some(configured_provider) = self.opencode_config.updated_provider() {
-                    providers.push(configured_provider);
-                }
-                let agent_config = AgentConfig { providers };
-                Task::done(Message::SaveAgentSettings(agent_config))
+                let providers: Vec<ConfiguredProvider> = [
+                    self.anthropic_config.updated_provider(),
+                    self.opencode_config.updated_provider(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+
+                Task::done(Message::SaveAgentSettings(AgentConfig { providers }))
             }
             SettingsMessage::Close => {
                 self.visible = false;

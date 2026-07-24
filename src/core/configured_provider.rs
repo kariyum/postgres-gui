@@ -10,6 +10,7 @@ pub enum BaseProvider {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfiguredProvider {
     pub api_key: String,
+    #[serde(flatten)]
     pub base_provider: BaseProvider,
     pub default_model: Option<String>,
     pub base_url: Option<String>,

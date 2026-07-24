@@ -32,7 +32,7 @@ pub fn config_path() -> Option<PathBuf> {
         .ok()
         .or_else(|| std::env::var("HOME").ok())
         .map(PathBuf::from);
-    home.map(|path| path.join(".config").join("pgeru").join("connections.json"))
+    home.map(|path| path.join(".config").join("pgeru").join("config.json"))
 }
 
 pub fn load_config() -> anyhow::Result<AppConfig> {
