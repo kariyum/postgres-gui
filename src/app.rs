@@ -46,18 +46,21 @@ pub enum Message {
     WindowResized(window::Id),
     MaximizedQueried(bool),
     Settings(SettingsMessage),
-    AIChat(AgentChatMessage),
+    AgentChat(AgentChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
     SaveAgentSettings(AgentConfig),
     LoadModels(Provider),
     LoadedModels(Result<ModelList, String>),
+    ToggleAgentMenu,
+    CloseAgentMenu,
+    AgentProviderSelected(ConfiguredProvider),
 }
 
 #[derive(Debug)]
 pub enum PaneKind {
     Main,
-    AIChat,
+    AgentChat,
 }
 
 #[derive(Debug)]
@@ -66,11 +69,12 @@ pub struct App {
     pub dialog: ConnectionDialog,
     pub settings: SettingsDialog,
     pub agent_config: AgentConfig,
-    pub ai_chat: AgentChat,
+    pub agent_chat: Option<AgentChat>,
     pub zoom_multiplier: u8,
     pub is_maximized: bool,
     pub saved_position: Option<Point>,
     pub menu_open: bool,
+    pub agent_menu_open: bool,
     pub pending_save: bool,
     panes: pane_grid::State<PaneKind>,
 }
@@ -78,17 +82,18 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         let (mut panes, main_pane) = pane_grid::State::new(PaneKind::Main);
-        panes.split(pane_grid::Axis::Vertical, main_pane, PaneKind::AIChat);
+        panes.split(pane_grid::Axis::Vertical, main_pane, PaneKind::AgentChat);
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
             settings: SettingsDialog::default(),
             agent_config: AgentConfig::default(),
-            ai_chat: AgentChat::default(),
+            agent_chat: None,
             zoom_multiplier: 0,
             is_maximized: false,
             saved_position: None,
             menu_open: false,
+            agent_menu_open: false,
             pending_save: false,
             panes,
         }
@@ -203,7 +208,13 @@ impl App {
                 Task::none()
             }
             Message::Settings(msg) => self.settings.update(msg),
-            Message::AIChat(msg) => self.ai_chat.update(msg),
+            Message::AgentChat(msg) => {
+                if let Some(ref mut agent) = self.agent_chat {
+                    agent.update(msg)
+                } else {
+                    Task::none()
+                }
+            }
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);
                 Task::none()
@@ -219,6 +230,19 @@ impl App {
             }
             Message::LoadedModels(model_list) => {
                 info!("Loaded models... {:?}", model_list);
+                Task::none()
+            }
+            Message::ToggleAgentMenu => {
+                self.agent_menu_open = !self.agent_menu_open;
+                Task::none()
+            }
+            Message::CloseAgentMenu => {
+                self.agent_menu_open = false;
+                Task::none()
+            }
+            Message::AgentProviderSelected(provider) => {
+                self.agent_chat = Some(AgentChat::new(provider));
+                self.agent_menu_open = false;
                 Task::none()
             }
         }
@@ -272,25 +296,40 @@ impl App {
     }
 
     pub fn view_footer(&self) -> Element<'_, Message> {
-        container(horizontal().width(Length::Fill))
-            .height(20)
-            .into()
+        let agent_btn = button(text("Agent").size(10))
+            .on_press(Message::ToggleAgentMenu)
+            .style(button::background);
+
+        let menu_content = self.agent_menu_content_view();
+
+        let dropdown = iced_aw::DropDown::new(agent_btn, menu_content, self.agent_menu_open)
+            .on_dismiss(Message::CloseAgentMenu)
+            .offset(iced_aw::drop_down::Offset::new(0.0, -30.0))
+            .width(200)
+            .alignment(drop_down::Alignment::BottomEnd);
+
+        container(row![horizontal(), dropdown,]).height(25).into()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
-        let content_area =
-            pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
-                PaneKind::Main => pane_grid::Content::new(self.view_main()),
-                PaneKind::AIChat => pane_grid::Content::new(row![
-                    rule::vertical(1),
-                    self.ai_chat.view().map(Message::AIChat)
-                ]),
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .spacing(0)
-            .on_resize(10, |event| Message::Resized(event));
+        let content_area: Element<Message> = match self.agent_chat {
+            Some(ref agent_chat) => {
+                pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
+                    PaneKind::Main => pane_grid::Content::new(self.view_main()),
+                    PaneKind::AgentChat => pane_grid::Content::new(row![
+                        rule::vertical(1),
+                        agent_chat.view().map(Message::AgentChat)
+                    ]),
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .spacing(0)
+                .on_resize(10, |event| Message::Resized(event))
+                .into()
+            }
+            None => self.view_main().into(),
+        };
 
         let layout = container(column![
             self.view_title_bar(),
@@ -561,17 +600,64 @@ impl App {
         menu_content.into()
     }
 
+    fn agent_menu_content_view(&self) -> Element<'_, Message> {
+        let buttons: Vec<Element<'_, Message>> = self
+            .agent_config
+            .providers
+            .iter()
+            .map(|provider| {
+                button(text(provider.base_provider.to_string()).size(13))
+                    .on_press(Message::AgentProviderSelected(provider.clone()))
+                    .padding([6, 12])
+                    .width(Length::Fill)
+                    .style(|_theme, _status| button::Style {
+                        border: border::rounded(0.0),
+                        ..button::subtle(_theme, _status)
+                    })
+                    .into()
+            })
+            .collect();
+
+        let menu_content = if buttons.is_empty() {
+            container(
+                text("No providers configured")
+                    .size(13)
+                    .style(|_theme: &Theme| text::Style {
+                        color: Some(Color::from_rgba(0.6, 0.6, 0.6, 1.0)),
+                    }),
+            )
+            .padding([6, 12])
+        } else {
+            container(column(buttons).spacing(0))
+        };
+
+        menu_content
+            .width(200)
+            .style(|theme: &Theme| container::Style {
+                background: Some(iced::Background::Color(
+                    theme.extended_palette().background.strong.color,
+                )),
+                border: iced::Border::default().rounded(4),
+                ..Default::default()
+            })
+            .into()
+    }
+
     fn sync_ai_tools(&mut self) {
         if let Some(ref active_id) = self.manager.active_connection {
             if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
-                if let Some(pool) = item.pool.clone() {
-                    self.ai_chat.set_tool_manager(ToolManager::new(pool));
+                if let Some(pool) = item.pool.clone()
+                    && let Some(ref mut agent_chat) = self.agent_chat
+                {
+                    agent_chat.set_tool_manager(ToolManager::new(pool)); // FIXME remove this
                     info!("sync_ai_tools: created ToolManager for connection {active_id}");
                     return;
                 }
             }
         }
-        self.ai_chat.set_tool_manager(ToolManager::without_db());
+        if let Some(ref mut agent_chat) = self.agent_chat {
+            agent_chat.set_tool_manager(ToolManager::without_db());
+        }
         info!("sync_ai_tools: no active pool, using ToolManager::without_db()");
     }
 }

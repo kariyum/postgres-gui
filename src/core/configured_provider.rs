@@ -1,3 +1,4 @@
+use std::fmt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5,6 +6,15 @@ use serde::{Deserialize, Serialize};
 pub enum BaseProvider {
     OpenCode,
     Anthropic,
+}
+
+impl fmt::Display for BaseProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BaseProvider::OpenCode => write!(f, "OpenCode"),
+            BaseProvider::Anthropic => write!(f, "Anthropic"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

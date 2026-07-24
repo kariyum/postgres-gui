@@ -305,6 +305,22 @@ impl Default for AgentChat {
 }
 
 impl AgentChat {
+    pub fn new(config: ConfiguredProvider) -> Self {
+        Self {
+            visible: false,
+            input: text_editor::Content::default(),
+            error: None,
+            messages: Vec::new(),
+            config: Some(config),
+            stream_id: None,
+            auto_scroll: true,
+            tool_manager: ToolManager::without_db(),
+            pending_tool_calls: HashMap::new(),
+            tool_call_entries: Vec::new(),
+            chosen_model: None,
+        }
+    }
+
     fn messages_view(&self) -> Element<'_, AgentChatMessage> {
         let msg_els: Vec<Element<'_, AgentChatMessage>> = self
             .messages
@@ -329,6 +345,8 @@ impl AgentChat {
 
     fn actions_view(&self) -> Element<'_, AgentChatMessage> {
         container(row![
+            text(format!("Config set: {:?}", self.config.is_some())),
+            text(format!("Default model is {:?}", self.chosen_model)),
             horizontal(),
             button(
                 svg(svg::Handle::from_memory(include_bytes!(
@@ -444,20 +462,22 @@ impl AgentChat {
                                     let message = match chat_response_chunk {
                                         Ok(chunk) => {
                                             if let ChatResponseChunk::Done = chunk {
-                                                Message::AIChat(AgentChatMessage::StreamFinished)
+                                                Message::AgentChat(AgentChatMessage::StreamFinished)
                                             } else {
-                                                Message::AIChat(AgentChatMessage::ChunkReceived(chunk))
+                                                Message::AgentChat(AgentChatMessage::ChunkReceived(
+                                                    chunk,
+                                                ))
                                             }
                                         }
-                                        Err(err) => Message::AIChat(AgentChatMessage::StreamError(
-                                            err.to_string(),
-                                        )),
+                                        Err(err) => Message::AgentChat(
+                                            AgentChatMessage::StreamError(err.to_string()),
+                                        ),
                                     };
                                     message
                                 }),
                                 Err(err) => {
                                     info!("Request failed with {err}");
-                                    Task::done(Message::AIChat(AgentChatMessage::StreamError(
+                                    Task::done(Message::AgentChat(AgentChatMessage::StreamError(
                                         err.to_string(),
                                     )))
                                 }
@@ -494,10 +514,7 @@ impl AgentChat {
                                         last.content.len()
                                     );
                                 } else {
-                                    info!(
-                                        "chunk Content (new msg): delta_len={}",
-                                        delta.len()
-                                    );
+                                    info!("chunk Content (new msg): delta_len={}", delta.len());
                                     self.messages.push(ChatMsg::new(Role::Assistant, delta));
                                 }
                             }
@@ -507,10 +524,7 @@ impl AgentChat {
                                 {
                                     last.markdown_content.push_str(&delta);
                                 } else {
-                                    info!(
-                                        "chunk Thinking: delta_len={}",
-                                        delta.len()
-                                    );
+                                    info!("chunk Thinking: delta_len={}", delta.len());
                                     self.messages.push(ChatMsg::new(Role::Thinking, delta));
                                 }
                             }
@@ -545,10 +559,7 @@ impl AgentChat {
                                 args.len()
                             );
                         } else {
-                            info!(
-                                "ToolCallDelta: call_id={} NOT FOUND in pending",
-                                call_id
-                            );
+                            info!("ToolCallDelta: call_id={} NOT FOUND in pending", call_id);
                         }
                     }
                     ChatResponseChunk::ToolCallComplete {
@@ -590,7 +601,7 @@ impl AgentChat {
                             task = Task::perform(
                                 async move { tm.execute(&tool_name, &args).await },
                                 move |result| {
-                                    Message::AIChat(AgentChatMessage::ToolExecutionResult {
+                                    Message::AgentChat(AgentChatMessage::ToolExecutionResult {
                                         call_id,
                                         result: result.map_err(|e| e.0),
                                     })
@@ -634,17 +645,14 @@ impl AgentChat {
                     Task::perform(
                         async move { tm.execute(&tool_name, &args).await },
                         move |result| {
-                            Message::AIChat(AgentChatMessage::ToolExecutionResult {
+                            Message::AgentChat(AgentChatMessage::ToolExecutionResult {
                                 call_id,
                                 result: result.map_err(|e| e.0),
                             })
                         },
                     )
                 } else {
-                    info!(
-                        "ApproveToolCall: call_id={} NOT FOUND in entries",
-                        call_id
-                    );
+                    info!("ApproveToolCall: call_id={} NOT FOUND in entries", call_id);
                     Task::none()
                 }
             }
@@ -661,10 +669,7 @@ impl AgentChat {
                         entry.tool_name, call_id
                     );
                 } else {
-                    info!(
-                        "RejectToolCall: call_id={} NOT FOUND in entries",
-                        call_id
-                    );
+                    info!("RejectToolCall: call_id={} NOT FOUND in entries", call_id);
                 }
                 self.maybe_re_prompt()
             }
@@ -675,10 +680,7 @@ impl AgentChat {
                         call_id,
                         data.len()
                     ),
-                    Err(err) => info!(
-                        "ToolExecutionResult: call_id={}, error={}",
-                        call_id, err
-                    ),
+                    Err(err) => info!("ToolExecutionResult: call_id={}, error={}", call_id, err),
                 }
                 if let Some(entry) = self
                     .tool_call_entries
@@ -794,7 +796,7 @@ impl AgentChat {
                 exec_tasks.push(Task::perform(
                     async move { tm.execute(&tool_name, &args).await },
                     move |result| {
-                        Message::AIChat(AgentChatMessage::ToolExecutionResult {
+                        Message::AgentChat(AgentChatMessage::ToolExecutionResult {
                             call_id,
                             result: result.map_err(|e| e.0),
                         })
@@ -899,20 +901,20 @@ impl AgentChat {
                         let message = match chat_response_chunk {
                             Ok(chunk) => {
                                 if let ChatResponseChunk::Done = chunk {
-                                    Message::AIChat(AgentChatMessage::StreamFinished)
+                                    Message::AgentChat(AgentChatMessage::StreamFinished)
                                 } else {
-                                    Message::AIChat(AgentChatMessage::ChunkReceived(chunk))
+                                    Message::AgentChat(AgentChatMessage::ChunkReceived(chunk))
                                 }
                             }
                             Err(err) => {
-                                Message::AIChat(AgentChatMessage::StreamError(err.to_string()))
+                                Message::AgentChat(AgentChatMessage::StreamError(err.to_string()))
                             }
                         };
                         message
                     }),
-                    Err(err) => {
-                        Task::done(Message::AIChat(AgentChatMessage::StreamError(err.to_string())))
-                    }
+                    Err(err) => Task::done(Message::AgentChat(AgentChatMessage::StreamError(
+                        err.to_string(),
+                    ))),
                 }
             })
         } else {
