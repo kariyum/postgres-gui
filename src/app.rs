@@ -296,9 +296,18 @@ impl App {
     }
 
     pub fn view_footer(&self) -> Element<'_, Message> {
-        let agent_btn = button(text("Agent").size(10))
-            .on_press(Message::ToggleAgentMenu)
-            .style(button::background);
+        let agent_btn = button(
+            svg(svg::Handle::from_memory(include_bytes!(
+                "resources/sparkles.svg"
+            )))
+            .height(14)
+            .width(14)
+            .style(|_theme, _status| svg::Style {
+                color: Some(Color::WHITE),
+            }),
+        )
+        .on_press(Message::ToggleAgentMenu)
+        .style(button::background);
 
         let menu_content = self.agent_menu_content_view();
 
