@@ -2,6 +2,7 @@ use std::eprintln;
 use std::time::Duration;
 
 use anyhow::Context;
+use iced::theme::palette::Background;
 use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
@@ -313,9 +314,9 @@ impl App {
 
         let dropdown = iced_aw::DropDown::new(agent_btn, menu_content, self.agent_menu_open)
             .on_dismiss(Message::CloseAgentMenu)
-            .offset(iced_aw::drop_down::Offset::new(0.0, -30.0))
-            .width(200)
-            .alignment(drop_down::Alignment::BottomEnd);
+            .width(Length::Shrink)
+            .offset(iced_aw::drop_down::Offset::new(0.0, 20.0))
+            .alignment(drop_down::Alignment::TopEnd);
 
         container(row![horizontal(), dropdown,]).height(25).into()
     }
@@ -617,10 +618,16 @@ impl App {
             .map(|provider| {
                 button(text(provider.base_provider.to_string()).size(13))
                     .on_press(Message::AgentProviderSelected(provider.clone()))
-                    .padding([6, 12])
+                    .padding([2, 4])
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style {
-                        border: border::rounded(0.0),
+                        border: iced::Border::default().rounded(4),
+                        background: match _status {
+                            button::Status::Active => {
+                                Some(iced::Background::Color(Color::TRANSPARENT))
+                            }
+                            _ => None,
+                        },
                         ..button::subtle(_theme, _status)
                     })
                     .into()
@@ -637,14 +644,14 @@ impl App {
             )
             .padding([6, 12])
         } else {
-            container(column(buttons).spacing(0))
+            container(column(buttons).spacing(4)).padding([2, 2])
         };
 
         menu_content
-            .width(200)
+            .width(100)
             .style(|theme: &Theme| container::Style {
                 background: Some(iced::Background::Color(
-                    theme.extended_palette().background.strong.color,
+                    theme.extended_palette().background.weaker.color,
                 )),
                 border: iced::Border::default().rounded(4),
                 ..Default::default()
