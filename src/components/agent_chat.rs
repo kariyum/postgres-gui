@@ -365,12 +365,37 @@ impl AgentChat {
                 AgentChatMessage::ModelSelected,
             )
             .placeholder("Select model")
+            .text_size(12)
+            .menu_height(150.0)
+            .width(Length::Shrink)
+            .style(|theme: &iced::Theme, status| {
+                let palette = theme.extended_palette();
+                let bg = match status {
+                    pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
+                        iced::Background::Color(palette.background.weak.color)
+                    }
+                    pick_list::Status::Active => {
+                        iced::Background::Color(palette.background.weakest.color)
+                    }
+                };
+                pick_list::Style {
+                    text_color: palette.background.weak.text,
+                    placeholder_color: palette.secondary.base.color,
+                    handle_color: palette.background.weak.text,
+                    background: bg,
+                    border: iced::Border {
+                        radius: 0.0.into(),
+                        width: 0.0,
+                        color: iced::Color::TRANSPARENT,
+                    },
+                }
+            })
             .into()
         };
 
         container(row![
-            model_picker,
             horizontal(),
+            model_picker,
             button(
                 svg(svg::Handle::from_memory(include_bytes!(
                     "../resources/send.svg"
@@ -751,14 +776,11 @@ impl AgentChat {
             AgentChatMessage::FetchModels => {
                 if let Some(ref config) = self.config {
                     let provider = crate::core::provider::Provider::from_config(config);
-                    Task::perform(
-                        async move { provider.load_models().await },
-                        |result| {
-                            Message::AgentChat(AgentChatMessage::ModelsFetched(
-                                result.map_err(|e| e.to_string()),
-                            ))
-                        },
-                    )
+                    Task::perform(async move { provider.load_models().await }, |result| {
+                        Message::AgentChat(AgentChatMessage::ModelsFetched(
+                            result.map_err(|e| e.to_string()),
+                        ))
+                    })
                 } else {
                     Task::none()
                 }
