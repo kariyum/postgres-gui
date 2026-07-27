@@ -8,7 +8,6 @@ use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
-use rig_core::model::ModelList;
 use tracing::{error, info};
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
@@ -52,7 +51,8 @@ pub enum Message {
     Resized(pane_grid::ResizeEvent),
     SaveAgentSettings(AgentConfig),
     LoadModels(Provider),
-    LoadedModels(Result<ModelList, String>),
+    LoadedModels(Result<Vec<String>, String>),
+    SettingsModelsFetched(Result<Vec<String>, String>),
     ToggleAgentMenu,
     CloseAgentMenu,
     AgentProviderSelected(ConfiguredProvider),
@@ -229,9 +229,21 @@ impl App {
                     Message::LoadedModels(result.map_err(|err| err.to_string()))
                 })
             }
-            Message::LoadedModels(model_list) => {
-                info!("Loaded models... {:?}", model_list);
+            Message::LoadedModels(result) => {
+                if let Some(ref mut agent_chat) = self.agent_chat {
+                    match result {
+                        Ok(models) => {
+                            agent_chat.available_models = models;
+                        }
+                        Err(err) => {
+                            error!("Failed to load models: {}", err);
+                        }
+                    }
+                }
                 Task::none()
+            }
+            Message::SettingsModelsFetched(result) => {
+                Task::done(Message::Settings(SettingsMessage::ModelsFetched(result)))
             }
             Message::ToggleAgentMenu => {
                 self.agent_menu_open = !self.agent_menu_open;
@@ -242,9 +254,10 @@ impl App {
                 Task::none()
             }
             Message::AgentProviderSelected(provider) => {
-                self.agent_chat = Some(AgentChat::new(provider));
+                let (chat, fetch_task) = AgentChat::new(provider);
+                self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
-                Task::none()
+                fetch_task
             }
         }
     }

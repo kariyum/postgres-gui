@@ -1,10 +1,9 @@
-use anyhow::Context;
 use iced::border::Radius;
 use iced::keyboard::key::{self};
 use iced::widget::operation;
 use iced::widget::space::horizontal;
 use iced::widget::{
-    button, column, container, markdown, row, rule, scrollable, svg, text, text_editor,
+    button, column, container, markdown, pick_list, row, rule, scrollable, svg, text, text_editor,
 };
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use serde::{Deserialize, Serialize};
@@ -15,7 +14,6 @@ use uuid::Uuid;
 
 use crate::app::Message;
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
-use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
 
@@ -32,6 +30,7 @@ pub struct AgentChat {
     pending_tool_calls: HashMap<String, (String, String)>,
     tool_call_entries: Vec<ToolCallEntry>,
     chosen_model: Option<String>,
+    pub available_models: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -284,6 +283,9 @@ pub enum AgentChatMessage {
         call_id: String,
         result: Result<String, String>,
     },
+    FetchModels,
+    ModelsFetched(Result<Vec<String>, String>),
+    ModelSelected(String),
 }
 
 impl Default for AgentChat {
@@ -300,13 +302,15 @@ impl Default for AgentChat {
             pending_tool_calls: HashMap::new(),
             tool_call_entries: Vec::new(),
             chosen_model: None,
+            available_models: Vec::new(),
         }
     }
 }
 
 impl AgentChat {
-    pub fn new(config: ConfiguredProvider) -> Self {
-        Self {
+    pub fn new(config: ConfiguredProvider) -> (Self, Task<Message>) {
+        let fetch_task = Task::done(Message::AgentChat(AgentChatMessage::FetchModels));
+        let chat = Self {
             visible: false,
             input: text_editor::Content::default(),
             error: None,
@@ -318,7 +322,9 @@ impl AgentChat {
             pending_tool_calls: HashMap::new(),
             tool_call_entries: Vec::new(),
             chosen_model: None,
-        }
+            available_models: Vec::new(),
+        };
+        (chat, fetch_task)
     }
 
     fn messages_view(&self) -> Element<'_, AgentChatMessage> {
@@ -344,9 +350,26 @@ impl AgentChat {
     }
 
     fn actions_view(&self) -> Element<'_, AgentChatMessage> {
+        let model_display = self
+            .chosen_model
+            .clone()
+            .or_else(|| self.config.as_ref().and_then(|c| c.default_model.clone()))
+            .unwrap_or_else(|| "No model selected".to_string());
+
+        let model_picker: Element<'_, AgentChatMessage> = if self.available_models.is_empty() {
+            text(model_display).size(12).into()
+        } else {
+            pick_list(
+                self.available_models.clone(),
+                self.chosen_model.clone(),
+                AgentChatMessage::ModelSelected,
+            )
+            .placeholder("Select model")
+            .into()
+        };
+
         container(row![
-            text(format!("Config set: {:?}", self.config.is_some())),
-            text(format!("Default model is {:?}", self.chosen_model)),
+            model_picker,
             horizontal(),
             button(
                 svg(svg::Handle::from_memory(include_bytes!(
@@ -723,6 +746,41 @@ impl AgentChat {
                 let visible = viewport.bounds();
                 let distance_from_bottom = content.height - visible.height - offset.y;
                 self.auto_scroll = distance_from_bottom < 50.0;
+                Task::none()
+            }
+            AgentChatMessage::FetchModels => {
+                if let Some(ref config) = self.config {
+                    let provider = crate::core::provider::Provider::from_config(config);
+                    Task::perform(
+                        async move { provider.load_models().await },
+                        |result| {
+                            Message::AgentChat(AgentChatMessage::ModelsFetched(
+                                result.map_err(|e| e.to_string()),
+                            ))
+                        },
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            AgentChatMessage::ModelsFetched(result) => {
+                match result {
+                    Ok(models) => {
+                        if self.chosen_model.is_none()
+                            || !models.contains(self.chosen_model.as_ref().unwrap())
+                        {
+                            self.chosen_model = models.first().cloned();
+                        }
+                        self.available_models = models;
+                    }
+                    Err(err) => {
+                        self.error = Some(format!("Failed to load models: {err}"));
+                    }
+                }
+                Task::none()
+            }
+            AgentChatMessage::ModelSelected(model) => {
+                self.chosen_model = Some(model);
                 Task::none()
             }
         }

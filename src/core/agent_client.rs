@@ -18,7 +18,10 @@ use tracing::info;
 use crate::components::agent_chat::Role;
 use crate::core::{agent_tools::ToolManager, configured_provider::ConfiguredProvider};
 
-pub async fn list_models(api_key: String, base_url: Option<String>) -> anyhow::Result<ModelList> {
+pub async fn list_opencode_models(
+    api_key: String,
+    base_url: Option<String>,
+) -> anyhow::Result<Vec<String>> {
     let mut client = openai::Client::builder();
 
     if let Some(base_url) = base_url {
@@ -28,14 +31,48 @@ pub async fn list_models(api_key: String, base_url: Option<String>) -> anyhow::R
     let built_client = client
         .api_key(api_key)
         .build()
-        .context("Failed to build OpenAI client: {e}")?;
+        .context("Failed to build OpenAI client")?;
 
-    let models = built_client
+    let model_list: ModelList = built_client
         .list_models()
         .await
-        .context("Failed to list models: {e}")?;
+        .context("Failed to list models")?;
 
-    Ok(models)
+    Ok(model_list.data.into_iter().map(|m| m.id).collect())
+}
+
+#[derive(Deserialize)]
+struct AnthropicModelsResponse {
+    data: Vec<AnthropicModel>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicModel {
+    id: String,
+}
+
+pub async fn list_anthropic_models(api_key: String) -> anyhow::Result<Vec<String>> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://api.anthropic.com/v1/models")
+        .header("anthropic-version", "2023-06-01")
+        .header("x-api-key", &api_key)
+        .send()
+        .await
+        .context("Failed to send Anthropic models request")?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Anthropic models request failed ({status}): {body}");
+    }
+
+    let response: AnthropicModelsResponse = resp
+        .json()
+        .await
+        .context("Failed to parse Anthropic models response")?;
+
+    Ok(response.data.into_iter().map(|m| m.id).collect())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -137,6 +174,7 @@ pub async fn prompt(
 
     info!("prompt: openai client built");
 
+    let model_name = model.clone();
     let model = built_client.completion_model(&model);
 
     let messages: Vec<Message> = prompt.into_iter().map(|m| m.into()).collect();
@@ -153,7 +191,7 @@ pub async fn prompt(
     let preamble = build_preamble();
 
     let request = CompletionRequest {
-        model: Some(String::from("deepseek-v4-flash-free")),
+        model: Some(model_name),
         preamble: Some(preamble),
         chat_history: OneOrMany::many(messages).context("Chat history cannot be empty")?,
         documents: vec![],

@@ -6,14 +6,13 @@ use crate::app::Message;
 use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
 use crate::core::agent_config::AgentConfig;
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
-use crate::core::provider::Provider;
 use crate::ui::input_field::InputField;
 
 #[derive(Debug, Clone)]
 pub struct SettingsDialog {
     pub visible: bool,
-    opencode_config: ProviderConfig,
-    anthropic_config: ProviderConfig,
+    pub opencode_config: ProviderConfig,
+    pub anthropic_config: ProviderConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +24,7 @@ pub enum SettingsMessage {
     Save,
     Close,
     Saved,
+    ModelsFetched(Result<Vec<String>, String>),
 }
 
 #[derive(Debug, Clone)]
@@ -147,7 +147,29 @@ impl SettingsDialog {
                 .flatten()
                 .collect();
 
-                Task::done(Message::SaveAgentSettings(AgentConfig { providers }))
+                let mut tasks = vec![Task::done(Message::SaveAgentSettings(AgentConfig {
+                    providers,
+                }))];
+
+                if !self.opencode_config.form.api_key.value.is_empty()
+                    && self.opencode_config.available_models.is_empty()
+                {
+                    tasks.push(
+                        self.opencode_config
+                            .update(ProviderConfigMessage::FetchModels),
+                    );
+                }
+
+                if !self.anthropic_config.form.api_key.value.is_empty()
+                    && self.anthropic_config.available_models.is_empty()
+                {
+                    tasks.push(
+                        self.anthropic_config
+                            .update(ProviderConfigMessage::FetchModels),
+                    );
+                }
+
+                Task::batch(tasks)
             }
             SettingsMessage::Close => {
                 self.visible = false;
@@ -157,26 +179,39 @@ impl SettingsDialog {
                 self.visible = false;
                 Task::none()
             }
-            SettingsMessage::OpenCodeConfigMessage(msg) => {
-                self.opencode_config.update(msg);
-                Task::none()
-            }
-            SettingsMessage::AnthropicConfigMessage(msg) => {
-                self.anthropic_config.update(msg);
-                Task::none()
-            }
+            SettingsMessage::OpenCodeConfigMessage(msg) => self.opencode_config.update(msg),
+            SettingsMessage::AnthropicConfigMessage(msg) => self.anthropic_config.update(msg),
             SettingsMessage::AgentConfig(agent_config) => {
                 info!("Agent config loaded {:?}", agent_config);
                 for provider in agent_config.providers {
                     if let BaseProvider::Anthropic = &provider.base_provider {
-                        self.anthropic_config
+                        let _ = self
+                            .anthropic_config
                             .update(ProviderConfigMessage::InitConfig(provider));
                     } else if let BaseProvider::OpenCode = &provider.base_provider {
-                        self.opencode_config
+                        let _ = self
+                            .opencode_config
                             .update(ProviderConfigMessage::InitConfig(provider));
                     }
                 }
                 Task::none()
+            }
+            SettingsMessage::ModelsFetched(result) => {
+                let opencode_task = if !self.opencode_config.form.api_key.value.is_empty() {
+                    self.opencode_config
+                        .update(ProviderConfigMessage::ModelsFetched(result.clone()))
+                } else {
+                    Task::none()
+                };
+
+                let anthropic_task = if !self.anthropic_config.form.api_key.value.is_empty() {
+                    self.anthropic_config
+                        .update(ProviderConfigMessage::ModelsFetched(result))
+                } else {
+                    Task::none()
+                };
+
+                Task::batch([opencode_task, anthropic_task])
             }
         }
     }
