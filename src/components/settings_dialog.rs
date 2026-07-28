@@ -147,15 +147,10 @@ impl SettingsDialog {
                 Action::None
             }
             SettingsMessage::Save => {
-                let providers: Vec<ConfiguredProvider> = [
-                    self.anthropic_config.updated_provider(),
-                    self.opencode_config.updated_provider(),
-                ]
-                .into_iter()
-                .flatten()
-                .collect();
-
-                let config = AgentConfig { providers };
+                let config = AgentConfig {
+                    anthropic_config: self.anthropic_config.updated_provider(),
+                    opencode_config: self.opencode_config.updated_provider(),
+                };
                 let mut fetch_tasks: Vec<Task<SettingsMessage>> = Vec::new();
 
                 if !self.opencode_config.form.api_key.value.is_empty()
@@ -207,18 +202,22 @@ impl SettingsDialog {
             }
             SettingsMessage::AgentConfig(agent_config) => {
                 info!("Agent config loaded {:?}", agent_config);
-                for provider in agent_config.providers {
-                    if let BaseProvider::Anthropic = &provider.base_provider {
-                        let _ = self
-                            .anthropic_config
-                            .update(ProviderConfigMessage::InitConfig(provider));
-                    } else if let BaseProvider::OpenCode = &provider.base_provider {
-                        let _ = self
-                            .opencode_config
-                            .update(ProviderConfigMessage::InitConfig(provider));
-                    }
+                let mut tasks: Vec<Task<SettingsMessage>> = Vec::new();
+                if let Some(provider) = agent_config.anthropic_config {
+                    tasks.push(
+                        self.anthropic_config
+                            .update(ProviderConfigMessage::InitConfig(provider))
+                            .map(SettingsMessage::AnthropicConfigMessage),
+                    );
                 }
-                Action::None
+                if let Some(provider) = agent_config.opencode_config {
+                    tasks.push(
+                        self.opencode_config
+                            .update(ProviderConfigMessage::InitConfig(provider))
+                            .map(SettingsMessage::OpenCodeConfigMessage),
+                    );
+                }
+                Action::Run(Task::batch(tasks))
             }
         }
     }

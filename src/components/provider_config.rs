@@ -1,4 +1,4 @@
-use iced::widget::{column, container, pick_list, rule, text};
+use iced::widget::{column, container, rule, text};
 use iced::{Element, Length, Task};
 
 use crate::components::settings_dialog::AgentSettingsForm;
@@ -22,7 +22,6 @@ pub enum ProviderConfigMessage {
     InitConfig(ConfiguredProvider),
     FetchModels,
     ModelsFetched(Result<Vec<String>, String>),
-    ModelSelected(String),
 }
 
 impl ProviderConfig {
@@ -49,7 +48,7 @@ impl ProviderConfig {
     }
 
     pub fn view(&self) -> Element<'_, ProviderConfigMessage> {
-        let mut content = column![
+        let content = column![
             column![
                 text(format!("{} Config", self.provider.label())).size(14),
                 rule::horizontal(1)
@@ -60,32 +59,6 @@ impl ProviderConfig {
                 .map(ProviderConfigMessage::ApiKeyField),
         ]
         .spacing(8);
-
-        if !self.form.api_key.value.is_empty() {
-            if self.models_loading {
-                content = content.push(text("Loading models...").size(12));
-            } else if self.available_models.is_empty() {
-                content = content.push(
-                    iced::widget::button(text("Fetch models").size(12))
-                        .on_press(ProviderConfigMessage::FetchModels)
-                        .padding([4, 8]),
-                );
-            } else {
-                content = content.push(
-                    column![
-                        text("Default Model").size(12),
-                        pick_list(
-                            self.available_models.clone(),
-                            self.selected_model.clone(),
-                            ProviderConfigMessage::ModelSelected,
-                        )
-                        .placeholder("Select a model")
-                        .width(Length::Fill),
-                    ]
-                    .spacing(4),
-                );
-            }
-        }
 
         container(content)
             .padding([8, 12])
@@ -100,16 +73,42 @@ impl ProviderConfig {
                 Task::none()
             }
             ProviderConfigMessage::InitConfig(configured_provider) => {
+                let default_model = configured_provider.default_model.clone();
                 self.form.api_key.update(InputFieldMessage::InputChanged(
                     configured_provider.api_key.to_string(),
                 ));
-                self.selected_model = configured_provider.default_model;
-                Task::none()
+                self.selected_model = default_model;
+                if !self.form.api_key.value.is_empty()
+                    && self.available_models.is_empty()
+                    && !self.models_loading
+                {
+                    self.models_loading = true;
+                    self.error = None;
+                    let provider = Provider::from_config(&configured_provider);
+                    Task::perform(
+                        async move { provider.load_models().await },
+                        |result| {
+                            ProviderConfigMessage::ModelsFetched(
+                                result.map_err(|e| e.to_string()),
+                            )
+                        },
+                    )
+                } else {
+                    Task::none()
+                }
             }
             ProviderConfigMessage::FetchModels => {
                 self.models_loading = true;
                 self.error = None;
-                let provider = self.provider.clone();
+                let provider = match &self.provider {
+                    Provider::OpenCode(open_code) => Provider::OpenCode(OpenCode {
+                        api_key: Some(self.form.api_key.value.clone()),
+                        base_url: open_code.base_url.clone(),
+                    }),
+                    Provider::Anthropic { .. } => Provider::Anthropic {
+                        api_key: Some(self.form.api_key.value.clone()),
+                    },
+                };
                 Task::perform(
                     async move { provider.load_models().await },
                     |result| {
@@ -137,10 +136,6 @@ impl ProviderConfig {
                 }
                 Task::none()
             }
-            ProviderConfigMessage::ModelSelected(model) => {
-                self.selected_model = Some(model);
-                Task::none()
-            }
         }
     }
 
@@ -154,12 +149,14 @@ impl ProviderConfig {
                 base_url: Some(open_code.base_url.clone()),
                 default_model: self.selected_model.clone(),
                 base_provider: BaseProvider::OpenCode,
+                available_models: self.available_models.clone(),
             }),
             Provider::Anthropic { .. } => Some(ConfiguredProvider {
                 api_key: self.form.api_key.value.clone(),
                 base_url: None,
                 default_model: self.selected_model.clone(),
                 base_provider: BaseProvider::Anthropic,
+                available_models: self.available_models.clone(),
             }),
         }
     }

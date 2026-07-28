@@ -19,8 +19,8 @@ use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::ToolManager;
-use crate::core::config_loader::{self, AppConfig, save_config};
-use crate::core::configured_provider::ConfiguredProvider;
+use crate::core::config_loader::{self, AppConfig};
+use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::provider::Provider;
 use iced_aw::drop_down;
 
@@ -49,8 +49,6 @@ pub enum Message {
     AgentChat(AgentChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
-    LoadModels(Provider),
-    LoadedModels(Result<Vec<String>, String>),
     ToggleAgentMenu,
     CloseAgentMenu,
     AgentProviderSelected(ConfiguredProvider),
@@ -127,10 +125,9 @@ impl App {
                         self.sync_ai_tools();
                         task.map(Message::ConnManager)
                     }
-                    Action::Dialog(msg) => self
-                        .dialog
-                        .update(msg)
-                        .map(|m| Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(m))),
+                    Action::Dialog(msg) => self.dialog.update(msg).map(|m| {
+                        Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(m))
+                    }),
                 }
             }
 
@@ -223,17 +220,27 @@ impl App {
                 match self.settings.update(msg) {
                     Action::None => Task::none(),
                     Action::Run(task) => task.map(Message::Settings),
-                    Action::SaveRequested { config, fetch_models } => {
+                    Action::SaveRequested {
+                        config,
+                        fetch_models,
+                    } => {
                         self.agent_config = config;
-                        Task::batch([
-                            self.save_config(),
-                            fetch_models.map(Message::Settings),
-                        ])
+                        Task::batch([self.save_config(), fetch_models.map(Message::Settings)])
                     }
                 }
             }
             Message::AgentChat(msg) => {
-                if let Some(ref mut agent) = self.agent_chat {
+                if let AgentChatMessage::ModelChanged(provider) = msg {
+                    match provider.base_provider {
+                        BaseProvider::Anthropic => {
+                            self.agent_config.anthropic_config = Some(provider);
+                        }
+                        BaseProvider::OpenCode => {
+                            self.agent_config.opencode_config = Some(provider);
+                        }
+                    }
+                    self.save_config()
+                } else if let Some(ref mut agent) = self.agent_chat {
                     agent.update(msg).map(Message::AgentChat)
                 } else {
                     Task::none()
@@ -241,24 +248,6 @@ impl App {
             }
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);
-                Task::none()
-            }
-            Message::LoadModels(config) => {
-                Task::perform(async move { config.load_models().await }, |result| {
-                    Message::LoadedModels(result.map_err(|err| err.to_string()))
-                })
-            }
-            Message::LoadedModels(result) => {
-                if let Some(ref mut agent_chat) = self.agent_chat {
-                    match result {
-                        Ok(models) => {
-                            agent_chat.available_models = models;
-                        }
-                        Err(err) => {
-                            error!("Failed to load models: {}", err);
-                        }
-                    }
-                }
                 Task::none()
             }
             Message::ToggleAgentMenu => {
@@ -269,11 +258,15 @@ impl App {
                 self.agent_menu_open = false;
                 Task::none()
             }
-            Message::AgentProviderSelected(provider) => {
-                let (chat, fetch_task) = AgentChat::new(provider);
+            Message::AgentProviderSelected(mut provider) => {
+                provider.available_models = match provider.base_provider {
+                    BaseProvider::Anthropic => self.settings.anthropic_config.available_models.clone(),
+                    BaseProvider::OpenCode => self.settings.opencode_config.available_models.clone(),
+                };
+                let (chat, _task) = AgentChat::new(provider);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
-                fetch_task.map(Message::AgentChat)
+                Task::none()
             }
         }
     }
@@ -640,13 +633,19 @@ impl App {
     }
 
     fn agent_menu_content_view(&self) -> Element<'_, Message> {
-        let buttons: Vec<Element<'_, Message>> = self
-            .agent_config
-            .providers
+        let providers: Vec<&ConfiguredProvider> = [
+            self.agent_config.anthropic_config.as_ref(),
+            self.agent_config.opencode_config.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let buttons: Vec<Element<'_, Message>> = providers
             .iter()
             .map(|provider| {
                 button(text(provider.base_provider.to_string()).size(13))
-                    .on_press(Message::AgentProviderSelected(provider.clone()))
+                    .on_press(Message::AgentProviderSelected((*provider).clone()))
                     .padding([2, 4])
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style {

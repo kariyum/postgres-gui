@@ -24,4 +24,6 @@ pub struct ConfiguredProvider {
     pub base_provider: BaseProvider,
     pub default_model: Option<String>,
     pub base_url: Option<String>,
+    #[serde(skip)]
+    pub available_models: Vec<String>,
 }

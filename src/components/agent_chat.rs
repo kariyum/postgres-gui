@@ -17,7 +17,6 @@ use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
-use crate::core::provider::Provider;
 
 #[derive(Clone, Debug)]
 pub enum AgentChatMessage {
@@ -35,9 +34,8 @@ pub enum AgentChatMessage {
         call_id: String,
         result: Result<String, String>,
     },
-    FetchModels,
-    ModelsFetched(Result<Vec<String>, String>),
     ModelSelected(String),
+    ModelChanged(ConfiguredProvider),
 }
 
 #[derive(Clone, Debug)]
@@ -53,27 +51,25 @@ pub struct AgentChat {
     pending_tool_calls: HashMap<String, (String, String)>,
     tool_call_entries: Vec<ToolCallEntry>,
     chosen_model: Option<String>,
-    pub available_models: Vec<String>,
 }
 
 impl AgentChat {
     pub fn new(config: ConfiguredProvider) -> (Self, Task<AgentChatMessage>) {
-        let fetch_task = Task::done(AgentChatMessage::FetchModels);
+        let chosen_model = config.default_model.clone();
         let chat = Self {
             visible: false,
             input: text_editor::Content::default(),
             error: None,
             messages: Vec::new(),
-            config: config,
+            config,
             stream_id: None,
             auto_scroll: true,
             tool_manager: ToolManager::without_db(),
             pending_tool_calls: HashMap::new(),
             tool_call_entries: Vec::new(),
-            chosen_model: None,
-            available_models: Vec::new(),
+            chosen_model,
         };
-        (chat, fetch_task)
+        (chat, Task::none())
     }
 
     fn messages_view(&self) -> Element<'_, AgentChatMessage> {
@@ -99,21 +95,17 @@ impl AgentChat {
     }
 
     fn actions_view(&self) -> Element<'_, AgentChatMessage> {
-        let model_display = self
+        let default_model = self
             .chosen_model
             .clone()
-            .or_else(|| self.config.default_model.clone())
-            .unwrap_or_else(|| "No model selected".to_string());
+            .or_else(|| self.config.default_model.clone());
 
-        let model_picker: Element<'_, AgentChatMessage> = if self.available_models.is_empty() {
-            text(model_display).size(12).into()
-        } else {
-            pick_list(
-                self.available_models.clone(),
-                self.chosen_model.clone(),
-                AgentChatMessage::ModelSelected,
-            )
-            .placeholder("Select model")
+        let model_picker: Element<'_, AgentChatMessage> = pick_list(
+            self.config.available_models.clone(),
+            default_model,
+            AgentChatMessage::ModelSelected,
+        )
+        .placeholder("Select model")
             .text_size(12)
             .menu_height(150.0)
             .width(Length::Shrink)
@@ -139,8 +131,7 @@ impl AgentChat {
                     },
                 }
             })
-            .into()
-        };
+            .into();
 
         container(row![
             horizontal(),
@@ -243,32 +234,39 @@ impl AgentChat {
 
                     self.stream_id = Some(Uuid::new_v4());
 
-                    let model = self.chosen_model.clone().or(self.config.default_model.clone());
+                    let model = self
+                        .chosen_model
+                        .clone()
+                        .or(self.config.default_model.clone());
 
                     info!("Model = {:?}, config = {:?}", model, self.config);
 
                     if let Some(model) = model {
-                        Task::future(agent_client::prompt(self.config.clone(), model, messages, tm)).then(
-                            |request_result| match request_result {
-                                Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                                    let message = match chat_response_chunk {
-                                        Ok(chunk) => {
-                                            if let ChatResponseChunk::Done = chunk {
-                                                AgentChatMessage::StreamFinished
-                                            } else {
-                                                AgentChatMessage::ChunkReceived(chunk)
-                                            }
+                        Task::future(agent_client::prompt(
+                            self.config.clone(),
+                            model,
+                            messages,
+                            tm,
+                        ))
+                        .then(|request_result| match request_result {
+                            Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                                let message = match chat_response_chunk {
+                                    Ok(chunk) => {
+                                        if let ChatResponseChunk::Done = chunk {
+                                            AgentChatMessage::StreamFinished
+                                        } else {
+                                            AgentChatMessage::ChunkReceived(chunk)
                                         }
-                                        Err(err) => AgentChatMessage::StreamError(err.to_string()),
-                                    };
-                                    message
-                                }),
-                                Err(err) => {
-                                    info!("Request failed with {err}");
-                                    Task::done(AgentChatMessage::StreamError(err.to_string()))
-                                }
-                            },
-                        )
+                                    }
+                                    Err(err) => AgentChatMessage::StreamError(err.to_string()),
+                                };
+                                message
+                            }),
+                            Err(err) => {
+                                info!("Request failed with {err}");
+                                Task::done(AgentChatMessage::StreamError(err.to_string()))
+                            }
+                        })
                     } else {
                         Task::none()
                     }
@@ -507,32 +505,12 @@ impl AgentChat {
                 self.auto_scroll = distance_from_bottom < 50.0;
                 Task::none()
             }
-            AgentChatMessage::FetchModels => {
-                let provider = Provider::from_config(&self.config);
-                Task::perform(async move { provider.load_models().await }, |result| {
-                    AgentChatMessage::ModelsFetched(result.map_err(|e| e.to_string()))
-                })
-            }
-            AgentChatMessage::ModelsFetched(result) => {
-                match result {
-                    Ok(models) => {
-                        if self.chosen_model.is_none()
-                            || !models.contains(self.chosen_model.as_ref().unwrap())
-                        {
-                            self.chosen_model = models.first().cloned();
-                        }
-                        self.available_models = models;
-                    }
-                    Err(err) => {
-                        self.error = Some(format!("Failed to load models: {err}"));
-                    }
-                }
-                Task::none()
-            }
             AgentChatMessage::ModelSelected(model) => {
-                self.chosen_model = Some(model);
-                Task::none()
+                self.chosen_model = Some(model.clone());
+                self.config.default_model = Some(model);
+                Task::done(AgentChatMessage::ModelChanged(self.config.clone()))
             }
+            AgentChatMessage::ModelChanged(_) => Task::none(),
         }
     }
 
@@ -693,26 +671,33 @@ impl AgentChat {
 
         self.stream_id = Some(Uuid::new_v4());
 
-        let model = self.chosen_model.clone().or(self.config.default_model.clone());
+        let model = self
+            .chosen_model
+            .clone()
+            .or(self.config.default_model.clone());
         if let Some(model) = model {
-            Task::future(agent_client::prompt(self.config.clone(), model, messages, tm)).then(
-                |request_result| match request_result {
-                    Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                        let message = match chat_response_chunk {
-                            Ok(chunk) => {
-                                if let ChatResponseChunk::Done = chunk {
-                                    AgentChatMessage::StreamFinished
-                                } else {
-                                    AgentChatMessage::ChunkReceived(chunk)
-                                }
+            Task::future(agent_client::prompt(
+                self.config.clone(),
+                model,
+                messages,
+                tm,
+            ))
+            .then(|request_result| match request_result {
+                Ok(stream) => Task::run(stream, |chat_response_chunk| {
+                    let message = match chat_response_chunk {
+                        Ok(chunk) => {
+                            if let ChatResponseChunk::Done = chunk {
+                                AgentChatMessage::StreamFinished
+                            } else {
+                                AgentChatMessage::ChunkReceived(chunk)
                             }
-                            Err(err) => AgentChatMessage::StreamError(err.to_string()),
-                        };
-                        message
-                    }),
-                    Err(err) => Task::done(AgentChatMessage::StreamError(err.to_string())),
-                },
-            )
+                        }
+                        Err(err) => AgentChatMessage::StreamError(err.to_string()),
+                    };
+                    message
+                }),
+                Err(err) => Task::done(AgentChatMessage::StreamError(err.to_string())),
+            })
         } else {
             Task::none()
         }
