@@ -17,6 +17,7 @@ use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
+use crate::core::provider::Provider;
 
 #[derive(Clone, Debug)]
 pub enum AgentChatMessage {
@@ -45,7 +46,7 @@ pub struct AgentChat {
     input: text_editor::Content,
     error: Option<String>,
     messages: Vec<ChatMsg>,
-    config: Option<ConfiguredProvider>,
+    config: ConfiguredProvider,
     stream_id: Option<Uuid>,
     auto_scroll: bool,
     tool_manager: ToolManager,
@@ -53,25 +54,6 @@ pub struct AgentChat {
     tool_call_entries: Vec<ToolCallEntry>,
     chosen_model: Option<String>,
     pub available_models: Vec<String>,
-}
-
-impl Default for AgentChat {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            input: text_editor::Content::default(),
-            error: None,
-            messages: Vec::new(),
-            config: None,
-            stream_id: None,
-            auto_scroll: true,
-            tool_manager: ToolManager::without_db(),
-            pending_tool_calls: HashMap::new(),
-            tool_call_entries: Vec::new(),
-            chosen_model: None,
-            available_models: Vec::new(),
-        }
-    }
 }
 
 impl AgentChat {
@@ -82,7 +64,7 @@ impl AgentChat {
             input: text_editor::Content::default(),
             error: None,
             messages: Vec::new(),
-            config: Some(config),
+            config: config,
             stream_id: None,
             auto_scroll: true,
             tool_manager: ToolManager::without_db(),
@@ -120,7 +102,7 @@ impl AgentChat {
         let model_display = self
             .chosen_model
             .clone()
-            .or_else(|| self.config.as_ref().and_then(|c| c.default_model.clone()))
+            .or_else(|| self.config.default_model.clone())
             .unwrap_or_else(|| "No model selected".to_string());
 
         let model_picker: Element<'_, AgentChatMessage> = if self.available_models.is_empty() {
@@ -261,18 +243,12 @@ impl AgentChat {
 
                     self.stream_id = Some(Uuid::new_v4());
 
-                    let model = self.chosen_model.clone().or(self
-                        .config
-                        .clone()
-                        .map(|config| config.default_model)
-                        .flatten());
+                    let model = self.chosen_model.clone().or(self.config.default_model.clone());
 
                     info!("Model = {:?}, config = {:?}", model, self.config);
 
-                    if let Some(config) = self.config.clone()
-                        && let Some(model) = model
-                    {
-                        Task::future(agent_client::prompt(config, model, messages, tm)).then(
+                    if let Some(model) = model {
+                        Task::future(agent_client::prompt(self.config.clone(), model, messages, tm)).then(
                             |request_result| match request_result {
                                 Ok(stream) => Task::run(stream, |chat_response_chunk| {
                                     let message = match chat_response_chunk {
@@ -532,14 +508,10 @@ impl AgentChat {
                 Task::none()
             }
             AgentChatMessage::FetchModels => {
-                if let Some(ref config) = self.config {
-                    let provider = crate::core::provider::Provider::from_config(config);
-                    Task::perform(async move { provider.load_models().await }, |result| {
-                        AgentChatMessage::ModelsFetched(result.map_err(|e| e.to_string()))
-                    })
-                } else {
-                    Task::none()
-                }
+                let provider = Provider::from_config(&self.config);
+                Task::perform(async move { provider.load_models().await }, |result| {
+                    AgentChatMessage::ModelsFetched(result.map_err(|e| e.to_string()))
+                })
             }
             AgentChatMessage::ModelsFetched(result) => {
                 match result {
@@ -721,16 +693,10 @@ impl AgentChat {
 
         self.stream_id = Some(Uuid::new_v4());
 
-        let model = self.chosen_model.clone().or(self
-            .config
-            .clone()
-            .map(|config| config.default_model)
-            .flatten());
-        if let Some(config) = self.config.clone()
-            && let Some(model) = model
-        {
-            Task::future(agent_client::prompt(config, model, messages, tm)).then(|request_result| {
-                match request_result {
+        let model = self.chosen_model.clone().or(self.config.default_model.clone());
+        if let Some(model) = model {
+            Task::future(agent_client::prompt(self.config.clone(), model, messages, tm)).then(
+                |request_result| match request_result {
                     Ok(stream) => Task::run(stream, |chat_response_chunk| {
                         let message = match chat_response_chunk {
                             Ok(chunk) => {
@@ -745,8 +711,8 @@ impl AgentChat {
                         message
                     }),
                     Err(err) => Task::done(AgentChatMessage::StreamError(err.to_string())),
-                }
-            })
+                },
+            )
         } else {
             Task::none()
         }

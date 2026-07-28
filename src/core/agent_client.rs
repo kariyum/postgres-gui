@@ -55,7 +55,6 @@ pub async fn list_anthropic_models(api_key: String) -> anyhow::Result<Vec<String
     let client = reqwest::Client::new();
     let resp = client
         .get("https://api.anthropic.com/v1/models")
-        .header("anthropic-version", "2023-06-01")
         .header("x-api-key", &api_key)
         .send()
         .await
