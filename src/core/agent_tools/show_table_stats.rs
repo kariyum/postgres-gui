@@ -1,25 +1,26 @@
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use sqlx::{PgPool, Row};
-
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sqlx::Row;
+use tokio::sync::mpsc::Sender;
 
-use super::ToolError;
+use super::{DbRequest, ToolError, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShowTableStatsArgs {
+    pub database_name: String,
     pub schema: String,
     pub table: String,
 }
 
 pub struct ShowTableStats {
-    pool: PgPool,
+    db_actor: Sender<DbRequest>,
 }
 
 impl ShowTableStats {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+        Self { db_actor }
     }
 }
 
@@ -35,12 +36,17 @@ impl Tool for ShowTableStats {
             name: self.name(),
             description:
                 "Get table statistics including estimated row count, total size, table size, \
-                          and index size. Returns a JSON object with byte sizes and row estimate. \
+                          and index size. The database_name must match one of the available connected databases. \
+                          Returns a JSON object with byte sizes and row estimate. \
                           Sizes are returned in bytes and as human-readable strings."
                     .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "database_name": {
+                        "type": "string",
+                        "description": "The name of the database containing the table"
+                    },
                     "schema": {
                         "type": "string",
                         "description": "The schema containing the table"
@@ -50,12 +56,14 @@ impl Tool for ShowTableStats {
                         "description": "The table name to get stats for"
                     }
                 },
-                "required": ["schema", "table"]
+                "required": ["database_name", "schema", "table"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let pool = get_pool(&self.db_actor, &args.database_name).await?;
+
         let row = sqlx::query(
             "SELECT \
                (SELECT pg_total_relation_size($1)) AS total_size_bytes, \
@@ -67,7 +75,7 @@ impl Tool for ShowTableStats {
         .bind(format!("{}.{}", args.schema, args.table))
         .bind(&args.schema)
         .bind(&args.table)
-        .fetch_one(&self.pool)
+        .fetch_one(&pool)
         .await?;
 
         let total: i64 = row.get("total_size_bytes");

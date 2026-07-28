@@ -1,8 +1,6 @@
-use std::eprintln;
 use std::time::Duration;
 
 use anyhow::Context;
-use iced::theme::palette::Background;
 use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
@@ -18,10 +16,8 @@ use crate::components::sidebar::{self, SidebarMessage};
 use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
-use crate::core::agent_tools::ToolManager;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
-use crate::core::provider::Provider;
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -118,11 +114,11 @@ impl App {
                 use crate::connection_manager::Action;
                 match self.manager.update(msg) {
                     Action::None => {
-                        self.sync_ai_tools();
+                        self.sync_connections();
                         Task::none()
                     }
                     Action::Run(task) => {
-                        self.sync_ai_tools();
+                        self.sync_connections();
                         task.map(Message::ConnManager)
                     }
                     Action::Dialog(msg) => self.dialog.update(msg).map(|m| {
@@ -687,21 +683,21 @@ impl App {
             .into()
     }
 
-    fn sync_ai_tools(&mut self) {
-        if let Some(ref active_id) = self.manager.active_connection {
-            if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
-                if let Some(pool) = item.pool.clone()
-                    && let Some(ref mut agent_chat) = self.agent_chat
-                {
-                    agent_chat.set_tool_manager(ToolManager::new(pool)); // FIXME remove this
-                    info!("sync_ai_tools: created ToolManager for connection {active_id}");
-                    return;
-                }
-            }
+    fn sync_connections(&self) {
+        let configs: Vec<crate::core::connection_config::ConnectionConfig> = self
+            .manager
+            .items
+            .iter()
+            .map(|i| i.cfg.clone())
+            .collect();
+        let pools: std::collections::HashMap<String, sqlx::PgPool> = self
+            .manager
+            .items
+            .iter()
+            .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
+            .collect();
+        if let Some(ref agent_chat) = self.agent_chat {
+            agent_chat.update_connections(configs, pools);
         }
-        if let Some(ref mut agent_chat) = self.agent_chat {
-            agent_chat.set_tool_manager(ToolManager::without_db());
-        }
-        info!("sync_ai_tools: no active pool, using ToolManager::without_db()");
     }
 }

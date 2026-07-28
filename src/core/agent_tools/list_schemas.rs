@@ -1,22 +1,23 @@
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use sqlx::PgPool;
-
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tokio::sync::mpsc::Sender;
 
-use super::ToolError;
+use super::{DbRequest, ToolError, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListSchemasArgs {}
+pub struct ListSchemasArgs {
+    pub database_name: String,
+}
 
 pub struct ListSchemas {
-    pool: PgPool,
+    db_actor: Sender<DbRequest>,
 }
 
 impl ListSchemas {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+        Self { db_actor }
     }
 }
 
@@ -31,22 +32,30 @@ impl Tool for ListSchemas {
         ToolDefinition {
             name: self.name(),
             description: "List all non-system schemas in the connected PostgreSQL database. \
+                          The database_name must match one of the available connected databases. \
                           Returns a JSON array of schema names."
                 .to_string(),
             parameters: json!({
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "database_name": {
+                        "type": "string",
+                        "description": "The name of the database to list schemas from"
+                    }
+                },
+                "required": ["database_name"]
             }),
         }
     }
 
-    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let pool = get_pool(&self.db_actor, &args.database_name).await?;
         let schemas: Vec<String> = sqlx::query_scalar(
             "SELECT schema_name FROM information_schema.schemata \
              WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
              ORDER BY schema_name",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&pool)
         .await?;
 
         Ok(json!({

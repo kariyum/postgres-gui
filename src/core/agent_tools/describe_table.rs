@@ -1,25 +1,26 @@
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use sqlx::{PgPool, Row};
-
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sqlx::Row;
+use tokio::sync::mpsc::Sender;
 
-use super::ToolError;
+use super::{DbRequest, ToolError, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DescribeTableArgs {
+    pub database_name: String,
     pub schema: String,
     pub table: String,
 }
 
 pub struct DescribeTable {
-    pool: PgPool,
+    db_actor: Sender<DbRequest>,
 }
 
 impl DescribeTable {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+        Self { db_actor }
     }
 }
 
@@ -34,12 +35,17 @@ impl Tool for DescribeTable {
         ToolDefinition {
             name: self.name(),
             description: "Describe a table's columns, types, nullability, defaults, primary key, and indexes. \
+                          The database_name must match one of the available connected databases. \
                           Returns a JSON object with 'columns' (array of column details), \
                           'primary_key' (array of PK column names), and 'indexes' (array of index definitions)."
                 .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "database_name": {
+                        "type": "string",
+                        "description": "The name of the database containing the table"
+                    },
                     "schema": {
                         "type": "string",
                         "description": "The schema containing the table"
@@ -49,12 +55,14 @@ impl Tool for DescribeTable {
                         "description": "The table name to describe"
                     }
                 },
-                "required": ["schema", "table"]
+                "required": ["database_name", "schema", "table"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let pool = get_pool(&self.db_actor, &args.database_name).await?;
+
         let columns: Vec<Value> = sqlx::query(
             "SELECT column_name, data_type, is_nullable, column_default, character_maximum_length \
              FROM information_schema.columns \
@@ -63,7 +71,7 @@ impl Tool for DescribeTable {
         )
         .bind(&args.schema)
         .bind(&args.table)
-        .fetch_all(&self.pool)
+        .fetch_all(&pool)
         .await?
         .iter()
         .map(|row| {
@@ -91,7 +99,7 @@ impl Tool for DescribeTable {
         )
         .bind(&args.schema)
         .bind(&args.table)
-        .fetch_all(&self.pool)
+        .fetch_all(&pool)
         .await?;
 
         let indexes: Vec<Value> = sqlx::query(
@@ -102,7 +110,7 @@ impl Tool for DescribeTable {
         )
         .bind(&args.schema)
         .bind(&args.table)
-        .fetch_all(&self.pool)
+        .fetch_all(&pool)
         .await?
         .iter()
         .map(|row| {

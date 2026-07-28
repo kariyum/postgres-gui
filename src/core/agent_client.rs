@@ -16,7 +16,7 @@ use rig_core::{OneOrMany, model::ModelList};
 use tracing::info;
 
 use crate::components::chat_msg::Role;
-use crate::core::{agent_tools::ToolManager, configured_provider::ConfiguredProvider};
+use crate::core::{agent_tools::Tools, configured_provider::ConfiguredProvider};
 
 pub async fn list_opencode_models(
     api_key: String,
@@ -157,7 +157,7 @@ pub async fn prompt(
     configured_provider: ConfiguredProvider,
     model: String,
     prompt: Vec<ChatMessage>,
-    tool_manager: ToolManager,
+    tool_manager: Tools,
 ) -> anyhow::Result<impl Stream<Item = anyhow::Result<ChatResponseChunk>>> {
     let mut client = openai::Client::builder();
 

@@ -1,24 +1,25 @@
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use sqlx::{Column, PgPool, Row, TypeInfo};
-
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sqlx::{Column, Row, TypeInfo};
+use tokio::sync::mpsc::Sender;
 
-use super::ToolError;
+use super::{DbRequest, ToolError, cell_to_value, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteSqlArgs {
+    pub database_name: String,
     pub sql: String,
 }
 
 pub struct ExecuteSql {
-    pool: PgPool,
+    db_actor: Sender<DbRequest>,
 }
 
 impl ExecuteSql {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+        Self { db_actor }
     }
 }
 
@@ -32,7 +33,8 @@ impl Tool for ExecuteSql {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: self.name(),
-            description: "Execute a SQL query against the connected PostgreSQL database. \
+            description: "Execute a SQL query against a PostgreSQL database. \
+                          The database_name must match one of the available connected databases. \
                           Returns results as a JSON object with 'columns' (array of column names), \
                           'rows' (array of arrays), 'rows_affected' count, and a 'truncated' flag. \
                           Results are capped at 50 rows. \
@@ -41,17 +43,22 @@ impl Tool for ExecuteSql {
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "database_name": {
+                        "type": "string",
+                        "description": "The name of the database to execute the query on"
+                    },
                     "sql": {
                         "type": "string",
                         "description": "The SQL query to execute"
                     }
                 },
-                "required": ["sql"]
+                "required": ["database_name", "sql"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let pool = get_pool(&self.db_actor, &args.database_name).await?;
         let trimmed = args.sql.trim().to_uppercase();
         let is_select = trimmed.starts_with("SELECT")
             || trimmed.starts_with("WITH")
@@ -60,7 +67,7 @@ impl Tool for ExecuteSql {
             || trimmed.starts_with("TABLE");
 
         if is_select {
-            let rows = sqlx::query(&args.sql).fetch_all(&self.pool).await?;
+            let rows = sqlx::query(&args.sql).fetch_all(&pool).await?;
 
             if rows.is_empty() {
                 return Ok(json!({
@@ -110,7 +117,7 @@ impl Tool for ExecuteSql {
             })
             .to_string())
         } else {
-            let result = sqlx::query(&args.sql).execute(&self.pool).await?;
+            let result = sqlx::query(&args.sql).execute(&pool).await?;
 
             let affected = result.rows_affected();
             Ok(json!({
@@ -123,29 +130,4 @@ impl Tool for ExecuteSql {
             .to_string())
         }
     }
-}
-
-fn cell_to_value(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> Value {
-    let string_val = match type_name {
-        "INT2" => row.try_get::<i16, _>(idx).ok().map(|v| v.to_string()),
-        "INT4" => row.try_get::<i32, _>(idx).ok().map(|v| v.to_string()),
-        "INT8" => row.try_get::<i64, _>(idx).ok().map(|v| v.to_string()),
-        "FLOAT4" => row.try_get::<f32, _>(idx).ok().map(|v| v.to_string()),
-        "FLOAT8" => row.try_get::<f64, _>(idx).ok().map(|v| v.to_string()),
-        "BOOL" => row.try_get::<bool, _>(idx).ok().map(|v| v.to_string()),
-        _ => None,
-    };
-
-    if let Some(s) = string_val {
-        return Value::String(s);
-    }
-
-    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v.map_or(Value::Null, Value::String);
-    }
-    if let Ok(v) = row.try_get::<Option<&str>, _>(idx) {
-        return v.map_or(Value::Null, |s| Value::String(s.to_string()));
-    }
-
-    Value::Null
 }

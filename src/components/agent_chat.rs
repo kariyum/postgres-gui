@@ -15,8 +15,10 @@ use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use crate::components::chat_msg::{self, ChatMsg, ChatMsgMessage, Role};
 use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
-use crate::core::agent_tools::{ToolManager, needs_approval};
+use crate::core::agent_tools::{Tools, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
+use crate::core::connection_config::ConnectionConfig;
+use crate::core::database_keeper::DatabaseKeeper;
 
 #[derive(Clone, Debug)]
 pub enum AgentChatMessage {
@@ -47,7 +49,7 @@ pub struct AgentChat {
     config: ConfiguredProvider,
     stream_id: Option<Uuid>,
     auto_scroll: bool,
-    tool_manager: ToolManager,
+    tool_manager: Tools,
     pending_tool_calls: HashMap<String, (String, String)>,
     tool_call_entries: Vec<ToolCallEntry>,
     chosen_model: Option<String>,
@@ -56,6 +58,9 @@ pub struct AgentChat {
 impl AgentChat {
     pub fn new(config: ConfiguredProvider) -> (Self, Task<AgentChatMessage>) {
         let chosen_model = config.default_model.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(1000);
+        let mut actor = DatabaseKeeper::new(rx);
+        tokio::spawn(async move { actor.run().await });
         let chat = Self {
             visible: false,
             input: text_editor::Content::default(),
@@ -64,7 +69,7 @@ impl AgentChat {
             config,
             stream_id: None,
             auto_scroll: true,
-            tool_manager: ToolManager::without_db(),
+            tool_manager: Tools::new(tx),
             pending_tool_calls: HashMap::new(),
             tool_call_entries: Vec::new(),
             chosen_model,
@@ -518,8 +523,12 @@ impl AgentChat {
         self.stream_id.is_some()
     }
 
-    pub fn set_tool_manager(&mut self, tm: ToolManager) {
-        self.tool_manager = tm;
+    pub fn update_connections(
+        &self,
+        configs: Vec<ConnectionConfig>,
+        pools: std::collections::HashMap<String, sqlx::PgPool>,
+    ) {
+        self.tool_manager.update_connections(configs, pools);
     }
 
     fn all_tool_calls_complete(&self) -> bool {
