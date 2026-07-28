@@ -15,7 +15,7 @@ use rig_core::streaming::{
 use rig_core::{OneOrMany, model::ModelList};
 use tracing::info;
 
-use crate::components::agent_chat::Role;
+use crate::components::chat_msg::Role;
 use crate::core::{agent_tools::ToolManager, configured_provider::ConfiguredProvider};
 
 pub async fn list_opencode_models(

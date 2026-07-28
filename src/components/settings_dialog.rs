@@ -2,7 +2,6 @@ use iced::widget::{Column, button, column, container, row, rule, space, text};
 use iced::{Color, Element, Length, Task, Theme};
 use tracing::info;
 
-use crate::app::Message;
 use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
 use crate::core::agent_config::AgentConfig;
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
@@ -24,7 +23,6 @@ pub enum SettingsMessage {
     Save,
     Close,
     Saved,
-    ModelsFetched(Result<Vec<String>, String>),
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +40,16 @@ impl AgentSettingsForm {
                 .secure(true),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum Action {
+    None,
+    Run(Task<SettingsMessage>),
+    SaveRequested {
+        config: AgentConfig,
+        fetch_models: Task<SettingsMessage>,
+    },
 }
 
 impl Default for SettingsDialog {
@@ -132,11 +140,11 @@ impl SettingsDialog {
         )
     }
 
-    pub fn update(&mut self, message: SettingsMessage) -> Task<Message> {
+    pub fn update(&mut self, message: SettingsMessage) -> Action {
         match message {
             SettingsMessage::Open => {
                 self.visible = true;
-                Task::none()
+                Action::None
             }
             SettingsMessage::Save => {
                 let providers: Vec<ConfiguredProvider> = [
@@ -147,40 +155,56 @@ impl SettingsDialog {
                 .flatten()
                 .collect();
 
-                let mut tasks = vec![Task::done(Message::SaveAgentSettings(AgentConfig {
-                    providers,
-                }))];
+                let config = AgentConfig { providers };
+                let mut fetch_tasks: Vec<Task<SettingsMessage>> = Vec::new();
 
                 if !self.opencode_config.form.api_key.value.is_empty()
                     && self.opencode_config.available_models.is_empty()
                 {
-                    tasks.push(
+                    fetch_tasks.push(
                         self.opencode_config
-                            .update(ProviderConfigMessage::FetchModels),
+                            .update(ProviderConfigMessage::FetchModels)
+                            .map(SettingsMessage::OpenCodeConfigMessage),
                     );
                 }
 
                 if !self.anthropic_config.form.api_key.value.is_empty()
                     && self.anthropic_config.available_models.is_empty()
                 {
-                    tasks.push(
+                    fetch_tasks.push(
                         self.anthropic_config
-                            .update(ProviderConfigMessage::FetchModels),
+                            .update(ProviderConfigMessage::FetchModels)
+                            .map(SettingsMessage::AnthropicConfigMessage),
                     );
                 }
 
-                Task::batch(tasks)
+                Action::SaveRequested {
+                    config,
+                    fetch_models: Task::batch(fetch_tasks),
+                }
             }
             SettingsMessage::Close => {
                 self.visible = false;
-                Task::none()
+                Action::None
             }
             SettingsMessage::Saved => {
                 self.visible = false;
-                Task::none()
+                Action::None
             }
-            SettingsMessage::OpenCodeConfigMessage(msg) => self.opencode_config.update(msg),
-            SettingsMessage::AnthropicConfigMessage(msg) => self.anthropic_config.update(msg),
+            SettingsMessage::OpenCodeConfigMessage(msg) => {
+                Action::Run(
+                    self.opencode_config
+                        .update(msg)
+                        .map(SettingsMessage::OpenCodeConfigMessage),
+                )
+            }
+            SettingsMessage::AnthropicConfigMessage(msg) => {
+                Action::Run(
+                    self.anthropic_config
+                        .update(msg)
+                        .map(SettingsMessage::AnthropicConfigMessage),
+                )
+            }
             SettingsMessage::AgentConfig(agent_config) => {
                 info!("Agent config loaded {:?}", agent_config);
                 for provider in agent_config.providers {
@@ -194,24 +218,7 @@ impl SettingsDialog {
                             .update(ProviderConfigMessage::InitConfig(provider));
                     }
                 }
-                Task::none()
-            }
-            SettingsMessage::ModelsFetched(result) => {
-                let opencode_task = if !self.opencode_config.form.api_key.value.is_empty() {
-                    self.opencode_config
-                        .update(ProviderConfigMessage::ModelsFetched(result.clone()))
-                } else {
-                    Task::none()
-                };
-
-                let anthropic_task = if !self.anthropic_config.form.api_key.value.is_empty() {
-                    self.anthropic_config
-                        .update(ProviderConfigMessage::ModelsFetched(result))
-                } else {
-                    Task::none()
-                };
-
-                Task::batch([opencode_task, anthropic_task])
+                Action::None
             }
         }
     }

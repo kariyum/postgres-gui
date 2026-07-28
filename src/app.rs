@@ -49,10 +49,8 @@ pub enum Message {
     AgentChat(AgentChatMessage),
     OpenAiSettings,
     Resized(pane_grid::ResizeEvent),
-    SaveAgentSettings(AgentConfig),
     LoadModels(Provider),
     LoadedModels(Result<Vec<String>, String>),
-    SettingsModelsFetched(Result<Vec<String>, String>),
     ToggleAgentMenu,
     CloseAgentMenu,
     AgentProviderSelected(ConfiguredProvider),
@@ -119,9 +117,21 @@ impl App {
             },
 
             Message::ConnManager(msg) => {
-                let task = self.manager.update(msg, &mut self.dialog);
-                self.sync_ai_tools();
-                task.map(Message::ConnManager)
+                use crate::connection_manager::Action;
+                match self.manager.update(msg) {
+                    Action::None => {
+                        self.sync_ai_tools();
+                        Task::none()
+                    }
+                    Action::Run(task) => {
+                        self.sync_ai_tools();
+                        task.map(Message::ConnManager)
+                    }
+                    Action::Dialog(msg) => self
+                        .dialog
+                        .update(msg)
+                        .map(|m| Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(m))),
+                }
             }
 
             Message::ConfigLoaded(config) => {
@@ -208,10 +218,23 @@ impl App {
                 self.is_maximized = maximized;
                 Task::none()
             }
-            Message::Settings(msg) => self.settings.update(msg),
+            Message::Settings(msg) => {
+                use crate::components::settings_dialog::Action;
+                match self.settings.update(msg) {
+                    Action::None => Task::none(),
+                    Action::Run(task) => task.map(Message::Settings),
+                    Action::SaveRequested { config, fetch_models } => {
+                        self.agent_config = config;
+                        Task::batch([
+                            self.save_config(),
+                            fetch_models.map(Message::Settings),
+                        ])
+                    }
+                }
+            }
             Message::AgentChat(msg) => {
                 if let Some(ref mut agent) = self.agent_chat {
-                    agent.update(msg)
+                    agent.update(msg).map(Message::AgentChat)
                 } else {
                     Task::none()
                 }
@@ -219,10 +242,6 @@ impl App {
             Message::Resized(event) => {
                 self.panes.resize(event.split, event.ratio);
                 Task::none()
-            }
-            Message::SaveAgentSettings(agent_config) => {
-                self.agent_config = agent_config;
-                self.save_config()
             }
             Message::LoadModels(config) => {
                 Task::perform(async move { config.load_models().await }, |result| {
@@ -242,9 +261,6 @@ impl App {
                 }
                 Task::none()
             }
-            Message::SettingsModelsFetched(result) => {
-                Task::done(Message::Settings(SettingsMessage::ModelsFetched(result)))
-            }
             Message::ToggleAgentMenu => {
                 self.agent_menu_open = !self.agent_menu_open;
                 Task::none()
@@ -257,7 +273,7 @@ impl App {
                 let (chat, fetch_task) = AgentChat::new(provider);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
-                fetch_task
+                fetch_task.map(Message::AgentChat)
             }
         }
     }

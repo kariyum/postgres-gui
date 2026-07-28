@@ -3,7 +3,7 @@ use iced::Task;
 use sqlx::PgPool;
 use tracing::error;
 
-use crate::components::connection_dialog::{self, DialogMessage};
+use crate::components::connection_dialog::DialogMessage;
 use crate::components::connection_item::{ConnectionItem, ItemMessage};
 use crate::core::config_loader::{self, AppConfig, load_config, save_config};
 use crate::core::connection_config::ConnectionConfig;
@@ -16,6 +16,13 @@ pub enum ConnManagerMessage {
     ConnectionDialogMessage(DialogMessage),
     ConnectionSaved(Result<(), String>),
     ConnectionsLoaded(Vec<ConnectionConfig>),
+}
+
+#[derive(Debug)]
+pub enum Action {
+    None,
+    Run(Task<ConnManagerMessage>),
+    Dialog(DialogMessage),
 }
 
 #[derive(Debug)]
@@ -34,11 +41,7 @@ impl Default for ConnectionManager {
 }
 
 impl ConnectionManager {
-    pub fn update(
-        &mut self,
-        message: ConnManagerMessage,
-        dialog: &mut connection_dialog::ConnectionDialog,
-    ) -> Task<ConnManagerMessage> {
+    pub fn update(&mut self, message: ConnManagerMessage) -> Action {
         match message {
             ConnManagerMessage::ConnectionItemMessage(id, msg) => {
                 self.handle_item_message(&id, msg)
@@ -49,28 +52,28 @@ impl ConnectionManager {
             }
 
             ConnManagerMessage::ConnectionDialogMessage(msg) => {
-                self.handle_dialog_message(msg, dialog)
+                self.handle_dialog_message(msg)
             }
 
-            ConnManagerMessage::ConnectionSaved(Ok(())) => Task::done(
-                ConnManagerMessage::ConnectionDialogMessage(DialogMessage::DialogClose),
-            ),
+            ConnManagerMessage::ConnectionSaved(Ok(())) => {
+                Action::Dialog(DialogMessage::DialogClose)
+            }
 
             ConnManagerMessage::ConnectionSaved(Err(e)) => {
                 error!("Failed to save connection: {e}");
-                Task::none()
+                Action::None
             }
 
             ConnManagerMessage::ConnectionsLoaded(configs) => {
                 for cfg in configs {
                     self.items.push(ConnectionItem::new(cfg));
                 }
-                Task::none()
+                Action::None
             }
         }
     }
 
-    fn handle_item_message(&mut self, id: &str, msg: ItemMessage) -> Task<ConnManagerMessage> {
+    fn handle_item_message(&mut self, id: &str, msg: ItemMessage) -> Action {
         let task = self.delegate_to_item(id, msg.clone());
 
         match msg {
@@ -83,28 +86,28 @@ impl ConnectionManager {
             ItemMessage::CopyStringRequested => self.handle_copy_string_requested(id),
             ItemMessage::Select => {
                 self.active_connection = Some(id.to_string());
-                Task::none()
+                Action::None
             }
-            _ => task,
+            _ => Action::Run(task),
         }
     }
 
-    fn handle_connect_requested(&mut self, id: &str) -> Task<ConnManagerMessage> {
+    fn handle_connect_requested(&mut self, id: &str) -> Action {
         let cs = match self.items.iter().find(|i| i.cfg.id == id) {
             Some(item) => item.cfg.connection_string(),
-            None => return Task::none(),
+            None => return Action::None,
         };
         let id = id.to_string();
-        Task::perform(async move { db::connect(&cs).await }, move |result| {
+        Action::Run(Task::perform(async move { db::connect(&cs).await }, move |result| {
             ConnManagerMessage::ConnectCompleted(id, result)
-        })
+        }))
     }
 
     fn handle_disconnect_requested(
         &mut self,
         id: &str,
         task: Task<ConnManagerMessage>,
-    ) -> Task<ConnManagerMessage> {
+    ) -> Action {
         if self.active_connection.as_deref() == Some(id) {
             self.active_connection = self
                 .items
@@ -112,55 +115,53 @@ impl ConnectionManager {
                 .find(|i| i.pool.is_some())
                 .map(|i| i.cfg.id.clone());
         }
-        task
+        Action::Run(task)
     }
 
     fn handle_run_query(
         &self,
         id: &str,
         task: Task<ConnManagerMessage>,
-    ) -> Task<ConnManagerMessage> {
+    ) -> Action {
         let (sql, pool) = match self.items.iter().find(|i| i.cfg.id == id) {
             Some(item) => (item.editor.text(), item.pool.clone()),
             None => {
-                return Task::done(ConnManagerMessage::ConnectionItemMessage(
+                return Action::Run(Task::done(ConnManagerMessage::ConnectionItemMessage(
                     id.to_string(),
                     ItemMessage::QueryResult(Err("Connection item deleted?".to_string())),
-                ));
+                )));
             }
         };
         let pool = match pool {
             Some(p) => p,
             None => {
-                return Task::done(ConnManagerMessage::ConnectionItemMessage(
+                return Action::Run(Task::done(ConnManagerMessage::ConnectionItemMessage(
                     id.to_string(),
                     ItemMessage::QueryResult(Err(
                         "Did not find connections to run the query".to_string()
                     )),
-                ));
+                )));
             }
         };
         let id = id.to_string();
-        Task::batch([
+        Action::Run(Task::batch([
             task,
             Task::perform(
                 async move { db::execute_query(&pool, &sql).await },
                 move |r| ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::QueryResult(r)),
             ),
-        ])
+        ]))
     }
 
-    fn handle_edit_requested(&self, id: &str) -> Task<ConnManagerMessage> {
+    fn handle_edit_requested(&self, id: &str) -> Action {
         let cfg = match self.items.iter().find(|i| i.cfg.id == id) {
             Some(item) => item.cfg.clone(),
-            None => return Task::none(),
+            None => return Action::None,
         };
-        Task::done(ConnManagerMessage::ConnectionDialogMessage(
-            DialogMessage::OpenEdit(cfg),
-        ))
+        Action::Dialog(DialogMessage::OpenEdit(cfg))
     }
 
-    fn handle_delete_requested(&mut self, id: &str) -> Task<ConnManagerMessage> {
+    fn handle_delete_requested(&mut self, id: &str) -> Action {
         self.items.retain(|i| i.cfg.id != id);
         if self.active_connection.as_deref() == Some(id) {
             self.active_connection = self
@@ -169,26 +170,26 @@ impl ConnectionManager {
                 .find(|i| i.pool.is_some())
                 .map(|i| i.cfg.id.clone());
         }
-        persist_connections(AppConfig::default(), &self.items) // FIXME
+        Action::Run(persist_connections(AppConfig::default(), &self.items)) // FIXME
     }
 
-    fn handle_duplicate_requested(&mut self, id: &str) -> Task<ConnManagerMessage> {
+    fn handle_duplicate_requested(&mut self, id: &str) -> Action {
         if let Some(item) = self.items.iter().find(|i| i.cfg.id == id) {
             let mut new_cfg = item.cfg.clone();
             new_cfg.id = uuid::Uuid::new_v4().to_string();
             new_cfg.name = format!("{} (copy)", new_cfg.name);
             self.items.push(ConnectionItem::new(new_cfg));
-            persist_connections(AppConfig::default(), &self.items) // FIXME
+            Action::Run(persist_connections(AppConfig::default(), &self.items)) // FIXME
         } else {
-            Task::none()
+            Action::None
         }
     }
 
-    fn handle_copy_string_requested(&self, id: &str) -> Task<ConnManagerMessage> {
+    fn handle_copy_string_requested(&self, id: &str) -> Action {
         if let Some(item) = self.items.iter().find(|i| i.cfg.id == id) {
-            iced::clipboard::write(item.cfg.connection_string())
+            Action::Run(iced::clipboard::write(item.cfg.connection_string()))
         } else {
-            Task::none()
+            Action::None
         }
     }
 
@@ -196,12 +197,12 @@ impl ConnectionManager {
         &mut self,
         id: String,
         result: Result<PgPool, String>,
-    ) -> Task<ConnManagerMessage> {
+    ) -> Action {
         match result {
             Ok(pool) => {
                 self.active_connection = Some(id.clone());
                 let id2 = id.clone();
-                Task::batch([
+                Action::Run(Task::batch([
                     self.delegate_to_item(&id, ItemMessage::ConnectSucceeded(pool.clone())),
                     Task::perform(
                         async move { db::fetch_schema_tree(&pool).await },
@@ -212,17 +213,16 @@ impl ConnectionManager {
                             )
                         },
                     ),
-                ])
+                ]))
             }
-            Err(e) => self.delegate_to_item(&id, ItemMessage::ConnectFailed(e)),
+            Err(e) => Action::Run(self.delegate_to_item(&id, ItemMessage::ConnectFailed(e))),
         }
     }
 
     fn handle_dialog_message(
         &mut self,
         msg: DialogMessage,
-        dialog: &mut connection_dialog::ConnectionDialog,
-    ) -> Task<ConnManagerMessage> {
+    ) -> Action {
         if let DialogMessage::DialogSaved(cfg) = &msg {
             if let Some(existing) = self.items.iter_mut().find(|i| i.cfg.id == cfg.id) {
                 let _ = existing.update(ItemMessage::UpdateConfig(cfg.clone()));
@@ -230,14 +230,9 @@ impl ConnectionManager {
                 self.items.push(ConnectionItem::new(cfg.clone()));
             }
 
-            let task = dialog.update(msg);
-            Task::batch([
-                task.map(ConnManagerMessage::ConnectionDialogMessage),
-                persist_connections(AppConfig::default(), &self.items), // FIXME
-            ])
+            Action::Run(persist_connections(AppConfig::default(), &self.items)) // FIXME
         } else {
-            let task = dialog.update(msg);
-            task.map(ConnManagerMessage::ConnectionDialogMessage)
+            Action::Dialog(msg)
         }
     }
 

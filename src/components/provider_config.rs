@@ -1,7 +1,6 @@
 use iced::widget::{column, container, pick_list, rule, text};
 use iced::{Element, Length, Task};
 
-use crate::app::Message;
 use crate::components::settings_dialog::AgentSettingsForm;
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::provider::{OpenCode, Provider};
@@ -94,7 +93,7 @@ impl ProviderConfig {
             .into()
     }
 
-    pub fn update(&mut self, message: ProviderConfigMessage) -> Task<Message> {
+    pub fn update(&mut self, message: ProviderConfigMessage) -> Task<ProviderConfigMessage> {
         match message {
             ProviderConfigMessage::ApiKeyField(input_field_message) => {
                 self.form.api_key.update(input_field_message);
@@ -114,7 +113,9 @@ impl ProviderConfig {
                 Task::perform(
                     async move { provider.load_models().await },
                     |result| {
-                        Message::SettingsModelsFetched(result.map_err(|e| e.to_string()))
+                        ProviderConfigMessage::ModelsFetched(
+                            result.map_err(|e| e.to_string()),
+                        )
                     },
                 )
             }

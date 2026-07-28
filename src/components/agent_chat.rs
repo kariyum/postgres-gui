@@ -1,271 +1,22 @@
-use iced::border::Radius;
-use iced::keyboard::key::{self};
-use iced::widget::operation;
-use iced::widget::space::horizontal;
-use iced::widget::{
-    button, column, container, markdown, pick_list, row, rule, scrollable, svg, text, text_editor,
-};
-use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{format, matches};
+use tracing::error;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::app::Message;
+use iced::keyboard::key::{self};
+use iced::widget::space::{self, horizontal};
+use iced::widget::{
+    button, column, container, pick_list, row, rule, scrollable, svg, text, text_editor,
+};
+use iced::widget::{markdown, operation};
+use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
+
+use crate::components::chat_msg::{self, ChatMsg, ChatMsgMessage, Role};
+use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{ToolManager, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
-
-#[derive(Clone, Debug)]
-pub struct AgentChat {
-    visible: bool,
-    input: text_editor::Content,
-    error: Option<String>,
-    messages: Vec<ChatMsg>,
-    config: Option<ConfiguredProvider>,
-    stream_id: Option<Uuid>,
-    auto_scroll: bool,
-    tool_manager: ToolManager,
-    pending_tool_calls: HashMap<String, (String, String)>,
-    tool_call_entries: Vec<ToolCallEntry>,
-    chosen_model: Option<String>,
-    pub available_models: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
-struct ToolCallEntry {
-    call_id: String,
-    tool_name: String,
-    args: String,
-    result: Option<String>,
-    error: Option<String>,
-    status: ToolCallStatus,
-}
-
-#[derive(Clone, Debug)]
-enum ToolCallStatus {
-    PendingApproval,
-    Running,
-    Completed,
-    Failed,
-    Rejected,
-}
-
-#[derive(Debug)]
-pub struct ChatMsg {
-    pub role: Role,
-    pub content: String,
-    markdown_content: markdown::Content,
-}
-
-impl Clone for ChatMsg {
-    fn clone(&self) -> Self {
-        Self {
-            role: self.role.clone(),
-            content: self.content.clone(),
-            markdown_content: markdown::Content::parse(&self.content),
-        }
-    }
-}
-
-impl ChatMsg {
-    pub fn new(role: Role, content: String) -> Self {
-        Self {
-            markdown_content: markdown::Content::parse(&content),
-            role,
-            content,
-        }
-    }
-}
-
-impl Into<ChatMessage> for ChatMsg {
-    fn into(self) -> ChatMessage {
-        ChatMessage {
-            content: self.content,
-            role: self.role,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum ChatMsgMessage {
-    LinkClicked(markdown::Uri),
-}
-
-impl ChatMsg {
-    fn view(&self) -> Element<'_, ChatMsgMessage> {
-        let content = container(
-            markdown::view(self.markdown_content.items(), Theme::CatppuccinMocha)
-                .map(ChatMsgMessage::LinkClicked),
-        )
-        .style(|_theme| container::Style {
-            background: Some(if let Role::Tool = self.role {
-                Background::Color(Color::from_rgba(0.15, 0.15, 0.25, 0.4))
-            } else {
-                Background::Color(Color::TRANSPARENT)
-            }),
-            ..Default::default()
-        })
-        .padding([8.0, 12.0]);
-
-        container(row![
-            if let Role::User = self.role {
-                horizontal()
-            } else {
-                iced::widget::Space::new()
-            },
-            content,
-        ])
-        .into()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    User,
-    Assistant,
-    Thinking,
-    System,
-    Tool,
-}
-
-impl ToolCallEntry {
-    fn icon(&self) -> &'static str {
-        match self.tool_name.as_str() {
-            "execute_sql" => "\u{1F5C4}\u{FE0F}",
-            "list_schemas" | "list_tables" => "\u{1F4CB}",
-            "describe_table" => "\u{1F50D}",
-            "explain_query" => "\u{1F4CA}",
-            "show_table_stats" => "\u{1F4C8}",
-            _ => "\u{1F527}",
-        }
-    }
-
-    fn status_label(&self) -> &'static str {
-        match &self.status {
-            ToolCallStatus::PendingApproval => "\u{26A0}\u{FE0F} Needs approval",
-            ToolCallStatus::Running => "\u{23F3} Running...",
-            ToolCallStatus::Completed => "\u{2705} Done",
-            ToolCallStatus::Failed => "\u{274C} Failed",
-            ToolCallStatus::Rejected => "\u{1F6AB} Rejected",
-        }
-    }
-
-    fn view(&self) -> Element<'_, AgentChatMessage> {
-        let mut children: Vec<Element<'_, AgentChatMessage>> = vec![
-            row![
-                text(format!("{} {}", self.icon(), self.tool_name)).size(13),
-                horizontal(),
-                text(self.status_label())
-                    .size(11)
-                    .color(Color::from_rgba(0.7, 0.7, 0.9, 1.0,)),
-            ]
-            .spacing(8)
-            .into(),
-            container(text(&self.args).size(11))
-                .padding([4, 6])
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.2))),
-                    border: Border {
-                        color: Color::from_rgba(0.5, 0.5, 0.8, 0.2),
-                        width: 1.0,
-                        radius: Radius::new(4.0),
-                    },
-                    ..Default::default()
-                })
-                .into(),
-        ];
-
-        if let Some(result) = &self.result {
-            children.push(
-                container(text(result).size(11))
-                    .padding([4, 6])
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.0, 0.2, 0.0, 0.15))),
-                        border: Border {
-                            color: Color::from_rgba(0.3, 0.8, 0.3, 0.3),
-                            width: 1.0,
-                            radius: Radius::new(4.0),
-                        },
-                        ..Default::default()
-                    })
-                    .into(),
-            );
-        }
-
-        if let Some(error) = &self.error {
-            children.push(
-                container(text(error).size(11).color(Color::from_rgb(1.0, 0.3, 0.3)))
-                    .padding([4, 6])
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.15))),
-                        border: Border {
-                            color: Color::from_rgba(1.0, 0.3, 0.3, 0.3),
-                            width: 1.0,
-                            radius: Radius::new(4.0),
-                        },
-                        ..Default::default()
-                    })
-                    .into(),
-            );
-        }
-
-        if let ToolCallStatus::PendingApproval = &self.status {
-            children.push(
-                row![
-                    button(
-                        text("Approve")
-                            .size(12)
-                            .color(Color::from_rgb(0.2, 0.8, 0.2))
-                    )
-                    .on_press(AgentChatMessage::ApproveToolCall(self.call_id.clone()))
-                    .style(|_theme, _status| button::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.0, 0.3, 0.0, 0.3,))),
-                        border: Border {
-                            color: Color::from_rgba(0.2, 0.8, 0.2, 0.5),
-                            width: 1.0,
-                            radius: Radius::new(4.0),
-                        },
-                        ..Default::default()
-                    }),
-                    button(
-                        text("Reject")
-                            .size(12)
-                            .color(Color::from_rgb(1.0, 0.3, 0.3))
-                    )
-                    .on_press(AgentChatMessage::RejectToolCall(self.call_id.clone()))
-                    .style(|_theme, _status| button::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.3,))),
-                        border: Border {
-                            color: Color::from_rgba(1.0, 0.3, 0.3, 0.5),
-                            width: 1.0,
-                            radius: Radius::new(4.0),
-                        },
-                        ..Default::default()
-                    }),
-                ]
-                .spacing(8)
-                .into(),
-            );
-        }
-
-        container(column(children).spacing(4))
-            .padding(8)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color::from_rgba(0.15, 0.15, 0.25, 0.6))),
-                border: Border {
-                    color: Color::from_rgba(0.5, 0.5, 0.9, 0.3),
-                    width: 1.0,
-                    radius: Radius::new(6.0),
-                },
-                ..Default::default()
-            })
-            .max_width(500)
-            .into()
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum AgentChatMessage {
@@ -288,6 +39,22 @@ pub enum AgentChatMessage {
     ModelSelected(String),
 }
 
+#[derive(Clone, Debug)]
+pub struct AgentChat {
+    visible: bool,
+    input: text_editor::Content,
+    error: Option<String>,
+    messages: Vec<ChatMsg>,
+    config: Option<ConfiguredProvider>,
+    stream_id: Option<Uuid>,
+    auto_scroll: bool,
+    tool_manager: ToolManager,
+    pending_tool_calls: HashMap<String, (String, String)>,
+    tool_call_entries: Vec<ToolCallEntry>,
+    chosen_model: Option<String>,
+    pub available_models: Vec<String>,
+}
+
 impl Default for AgentChat {
     fn default() -> Self {
         Self {
@@ -308,8 +75,8 @@ impl Default for AgentChat {
 }
 
 impl AgentChat {
-    pub fn new(config: ConfiguredProvider) -> (Self, Task<Message>) {
-        let fetch_task = Task::done(Message::AgentChat(AgentChatMessage::FetchModels));
+    pub fn new(config: ConfiguredProvider) -> (Self, Task<AgentChatMessage>) {
+        let fetch_task = Task::done(AgentChatMessage::FetchModels);
         let chat = Self {
             visible: false,
             input: text_editor::Content::default(),
@@ -439,7 +206,7 @@ impl AgentChat {
                 background: Background::Color(_theme.extended_palette().background.weakest.color),
                 border: Border {
                     color: Color::TRANSPARENT,
-                    radius: Radius::new(0),
+                    radius: iced::border::Radius::new(0),
                     width: 0.0,
                 },
                 ..text_editor::default(_theme, _status)
@@ -454,6 +221,7 @@ impl AgentChat {
             container(text("AI Chat").size(14)).padding([4.0, 8.0]),
             rule::horizontal(1.0),
             self.messages_view(),
+            self.error_view(),
             rule::horizontal(1.0),
             self.editor_view(),
             self.actions_view()
@@ -464,7 +232,7 @@ impl AgentChat {
             .into()
     }
 
-    pub fn update(&mut self, message: AgentChatMessage) -> Task<Message> {
+    pub fn update(&mut self, message: AgentChatMessage) -> Task<AgentChatMessage> {
         match message {
             AgentChatMessage::TogglePanel => {
                 self.visible = !self.visible;
@@ -510,24 +278,18 @@ impl AgentChat {
                                     let message = match chat_response_chunk {
                                         Ok(chunk) => {
                                             if let ChatResponseChunk::Done = chunk {
-                                                Message::AgentChat(AgentChatMessage::StreamFinished)
+                                                AgentChatMessage::StreamFinished
                                             } else {
-                                                Message::AgentChat(AgentChatMessage::ChunkReceived(
-                                                    chunk,
-                                                ))
+                                                AgentChatMessage::ChunkReceived(chunk)
                                             }
                                         }
-                                        Err(err) => Message::AgentChat(
-                                            AgentChatMessage::StreamError(err.to_string()),
-                                        ),
+                                        Err(err) => AgentChatMessage::StreamError(err.to_string()),
                                     };
                                     message
                                 }),
                                 Err(err) => {
                                     info!("Request failed with {err}");
-                                    Task::done(Message::AgentChat(AgentChatMessage::StreamError(
-                                        err.to_string(),
-                                    )))
+                                    Task::done(AgentChatMessage::StreamError(err.to_string()))
                                 }
                             },
                         )
@@ -648,11 +410,9 @@ impl AgentChat {
                             let tm = self.tool_manager.clone();
                             task = Task::perform(
                                 async move { tm.execute(&tool_name, &args).await },
-                                move |result| {
-                                    Message::AgentChat(AgentChatMessage::ToolExecutionResult {
-                                        call_id,
-                                        result: result.map_err(|e| e.0),
-                                    })
+                                move |result| AgentChatMessage::ToolExecutionResult {
+                                    call_id,
+                                    result: result.map_err(|e| e.0),
                                 },
                             );
                         } else {
@@ -692,11 +452,9 @@ impl AgentChat {
                     );
                     Task::perform(
                         async move { tm.execute(&tool_name, &args).await },
-                        move |result| {
-                            Message::AgentChat(AgentChatMessage::ToolExecutionResult {
-                                call_id,
-                                result: result.map_err(|e| e.0),
-                            })
+                        move |result| AgentChatMessage::ToolExecutionResult {
+                            call_id,
+                            result: result.map_err(|e| e.0),
                         },
                     )
                 } else {
@@ -754,7 +512,7 @@ impl AgentChat {
                 self.maybe_re_prompt()
             }
             AgentChatMessage::StreamError(err) => {
-                info!("StreamError: {}", err);
+                error!("StreamError: {}", err);
                 self.error = Some(err);
                 self.stream_id = None;
                 Task::none()
@@ -777,9 +535,7 @@ impl AgentChat {
                 if let Some(ref config) = self.config {
                     let provider = crate::core::provider::Provider::from_config(config);
                     Task::perform(async move { provider.load_models().await }, |result| {
-                        Message::AgentChat(AgentChatMessage::ModelsFetched(
-                            result.map_err(|e| e.to_string()),
-                        ))
+                        AgentChatMessage::ModelsFetched(result.map_err(|e| e.to_string()))
                     })
                 } else {
                     Task::none()
@@ -830,7 +586,7 @@ impl AgentChat {
 
     /// Drain all entries from `pending_tool_calls` and turn them into
     /// `ToolCallEntry` items. Non-destructive calls are auto-executed.
-    fn flush_pending_tool_calls(&mut self) -> Task<Message> {
+    fn flush_pending_tool_calls(&mut self) -> Task<AgentChatMessage> {
         if self.pending_tool_calls.is_empty() {
             return Task::none();
         }
@@ -842,7 +598,7 @@ impl AgentChat {
         );
 
         let pending: HashMap<String, (String, String)> = self.pending_tool_calls.drain().collect();
-        let mut exec_tasks: Vec<Task<Message>> = Vec::new();
+        let mut exec_tasks: Vec<Task<AgentChatMessage>> = Vec::new();
 
         for (call_id, (tool_name, args)) in pending {
             if args.is_empty() {
@@ -875,11 +631,9 @@ impl AgentChat {
                 let tm = self.tool_manager.clone();
                 exec_tasks.push(Task::perform(
                     async move { tm.execute(&tool_name, &args).await },
-                    move |result| {
-                        Message::AgentChat(AgentChatMessage::ToolExecutionResult {
-                            call_id,
-                            result: result.map_err(|e| e.0),
-                        })
+                    move |result| AgentChatMessage::ToolExecutionResult {
+                        call_id,
+                        result: result.map_err(|e| e.0),
                     },
                 ));
             }
@@ -892,7 +646,7 @@ impl AgentChat {
         combined
     }
 
-    fn maybe_re_prompt(&mut self) -> Task<Message> {
+    fn maybe_re_prompt(&mut self) -> Task<AgentChatMessage> {
         if self.stream_id.is_some() {
             info!("maybe_re_prompt: skipped (stream active)");
             return Task::none();
@@ -981,24 +735,27 @@ impl AgentChat {
                         let message = match chat_response_chunk {
                             Ok(chunk) => {
                                 if let ChatResponseChunk::Done = chunk {
-                                    Message::AgentChat(AgentChatMessage::StreamFinished)
+                                    AgentChatMessage::StreamFinished
                                 } else {
-                                    Message::AgentChat(AgentChatMessage::ChunkReceived(chunk))
+                                    AgentChatMessage::ChunkReceived(chunk)
                                 }
                             }
-                            Err(err) => {
-                                Message::AgentChat(AgentChatMessage::StreamError(err.to_string()))
-                            }
+                            Err(err) => AgentChatMessage::StreamError(err.to_string()),
                         };
                         message
                     }),
-                    Err(err) => Task::done(Message::AgentChat(AgentChatMessage::StreamError(
-                        err.to_string(),
-                    ))),
+                    Err(err) => Task::done(AgentChatMessage::StreamError(err.to_string())),
                 }
             })
         } else {
             Task::none()
+        }
+    }
+
+    fn error_view(&self) -> Element<'_, AgentChatMessage> {
+        match &self.error {
+            Some(err) => container(text(err).size(14)).padding([4, 8]).into(),
+            None => iced::widget::space().into(),
         }
     }
 }

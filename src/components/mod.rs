@@ -1,8 +1,10 @@
 pub mod settings_dialog;
 pub mod agent_chat;
+pub mod chat_msg;
 pub mod connection_dialog;
 pub mod connection_item;
 pub mod schema_tree;
 pub mod sidebar;
+pub mod tool_call_entry;
 pub mod welcome_view;
 pub mod provider_config;
