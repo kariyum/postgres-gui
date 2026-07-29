@@ -56,10 +56,14 @@ pub struct AgentChat {
 }
 
 impl AgentChat {
-    pub fn new(config: ConfiguredProvider) -> (Self, Task<AgentChatMessage>) {
+    pub fn new(
+        config: ConfiguredProvider,
+        configs: Vec<ConnectionConfig>,
+        pools: HashMap<String, sqlx::PgPool>,
+    ) -> (Self, Task<AgentChatMessage>) {
         let chosen_model = config.default_model.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(1000);
-        let mut actor = DatabaseKeeper::new(rx);
+        let mut actor = DatabaseKeeper::new(configs, pools, rx);
         tokio::spawn(async move { actor.run().await });
         let chat = Self {
             visible: false,
@@ -111,32 +115,32 @@ impl AgentChat {
             AgentChatMessage::ModelSelected,
         )
         .placeholder("Select model")
-            .text_size(12)
-            .menu_height(150.0)
-            .width(Length::Shrink)
-            .style(|theme: &iced::Theme, status| {
-                let palette = theme.extended_palette();
-                let bg = match status {
-                    pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
-                        iced::Background::Color(palette.background.weak.color)
-                    }
-                    pick_list::Status::Active => {
-                        iced::Background::Color(palette.background.weakest.color)
-                    }
-                };
-                pick_list::Style {
-                    text_color: palette.background.weak.text,
-                    placeholder_color: palette.secondary.base.color,
-                    handle_color: palette.background.weak.text,
-                    background: bg,
-                    border: iced::Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: iced::Color::TRANSPARENT,
-                    },
+        .text_size(12)
+        .menu_height(150.0)
+        .width(Length::Shrink)
+        .style(|theme: &iced::Theme, status| {
+            let palette = theme.extended_palette();
+            let bg = match status {
+                pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
+                    iced::Background::Color(palette.background.weak.color)
                 }
-            })
-            .into();
+                pick_list::Status::Active => {
+                    iced::Background::Color(palette.background.weakest.color)
+                }
+            };
+            pick_list::Style {
+                text_color: palette.background.weak.text,
+                placeholder_color: palette.secondary.base.color,
+                handle_color: palette.background.weak.text,
+                background: bg,
+                border: iced::Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: iced::Color::TRANSPARENT,
+                },
+            }
+        })
+        .into();
 
         container(row![
             horizontal(),

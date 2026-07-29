@@ -50,10 +50,14 @@ pub struct DatabaseKeeper {
 }
 
 impl DatabaseKeeper {
-    pub fn new(receiver: mpsc::Receiver<DbRequest>) -> Self {
+    pub fn new(
+        configs: Vec<ConnectionConfig>,
+        pools: HashMap<String, PgPool>,
+        receiver: mpsc::Receiver<DbRequest>,
+    ) -> Self {
         Self {
-            configs: Vec::new(),
-            pools: HashMap::new(),
+            configs,
+            pools,
             receiver,
         }
     }
@@ -65,22 +69,18 @@ impl DatabaseKeeper {
                     database_name,
                     respond,
                 } => {
-                    let result = self
-                        .pools
-                        .get(&database_name)
-                        .cloned()
-                        .ok_or_else(|| {
-                            warn!(
-                                "GetPool: '{}' not found, available: {:?}",
-                                database_name,
-                                self.pools.keys().collect::<Vec<_>>()
-                            );
-                            ToolError(format!(
-                                "Database '{}' not found. Available: {:?}",
-                                database_name,
-                                self.pools.keys().collect::<Vec<_>>()
-                            ))
-                        });
+                    let result = self.pools.get(&database_name).cloned().ok_or_else(|| {
+                        warn!(
+                            "GetPool: '{}' not found, available: {:?}",
+                            database_name,
+                            self.pools.keys().collect::<Vec<_>>()
+                        );
+                        ToolError(format!(
+                            "Database '{}' not found. Available: {:?}",
+                            database_name,
+                            self.pools.keys().collect::<Vec<_>>()
+                        ))
+                    });
                     let _ = respond.send(result);
                 }
                 DbRequest::GetConnections { respond } => {

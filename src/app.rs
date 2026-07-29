@@ -18,6 +18,7 @@ use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
+use crate::core::connection_config::ConnectionConfig;
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -130,7 +131,8 @@ impl App {
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
-                info!("agent_config is {:?}", self.agent_config);
+                info!("Loaded config {:?}", config);
+                self.sync_connections();
                 Task::batch([
                     Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
                         config.connections,
@@ -256,10 +258,28 @@ impl App {
             }
             Message::AgentProviderSelected(mut provider) => {
                 provider.available_models = match provider.base_provider {
-                    BaseProvider::Anthropic => self.settings.anthropic_config.available_models.clone(),
-                    BaseProvider::OpenCode => self.settings.opencode_config.available_models.clone(),
+                    BaseProvider::Anthropic => {
+                        self.settings.anthropic_config.available_models.clone()
+                    }
+                    BaseProvider::OpenCode => {
+                        self.settings.opencode_config.available_models.clone()
+                    }
                 };
-                let (chat, _task) = AgentChat::new(provider);
+
+                let configs: Vec<ConnectionConfig> = self
+                    .manager
+                    .items
+                    .iter()
+                    .map(|connection_item| connection_item.cfg.clone())
+                    .collect();
+
+                let pools: std::collections::HashMap<String, sqlx::PgPool> = self
+                    .manager
+                    .items
+                    .iter()
+                    .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
+                    .collect();
+                let (chat, _task) = AgentChat::new(provider, configs, pools);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
                 Task::none()
@@ -684,18 +704,22 @@ impl App {
     }
 
     fn sync_connections(&self) {
-        let configs: Vec<crate::core::connection_config::ConnectionConfig> = self
+        info!("Sync connections...");
+        let configs: Vec<ConnectionConfig> = self
             .manager
             .items
             .iter()
-            .map(|i| i.cfg.clone())
+            .map(|connection_item| connection_item.cfg.clone())
             .collect();
+
         let pools: std::collections::HashMap<String, sqlx::PgPool> = self
             .manager
             .items
             .iter()
             .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
             .collect();
+
+        info!("agent_chat is defined: {}", self.agent_chat.is_some());
         if let Some(ref agent_chat) = self.agent_chat {
             agent_chat.update_connections(configs, pools);
         }

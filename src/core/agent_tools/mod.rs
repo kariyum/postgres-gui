@@ -144,6 +144,7 @@ impl Tools {
         configs: Vec<crate::core::connection_config::ConnectionConfig>,
         pools: HashMap<String, PgPool>,
     ) {
+        info!("Sending connections update to DatabaseKeeper actor!");
         let _ = self
             .sender
             .try_send(DbRequest::UpdateConnections { configs, pools });
