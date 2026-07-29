@@ -173,8 +173,7 @@ pub async fn prompt(
 
     info!("prompt: openai client built");
 
-    let model_name = model.clone();
-    let model = built_client.completion_model(&model);
+    let completion_model = built_client.completion_model(&model);
 
     let messages: Vec<Message> = prompt.into_iter().map(|m| m.into()).collect();
     info!(
@@ -190,7 +189,7 @@ pub async fn prompt(
     let preamble = build_preamble();
 
     let request = CompletionRequest {
-        model: Some(model_name),
+        model: Some(model),
         preamble: Some(preamble),
         chat_history: OneOrMany::many(messages).context("Chat history cannot be empty")?,
         documents: vec![],
@@ -202,8 +201,8 @@ pub async fn prompt(
         output_schema: None,
     };
 
-    info!("prompt: calling model.stream()...");
-    let stream: StreamingCompletionResponse<_> = model
+    info!("prompt: calling completion_model.stream()...");
+    let stream = completion_model
         .stream(request)
         .await
         .context("Failed to start streaming completion")?;
@@ -242,16 +241,7 @@ pub async fn prompt(
                 }
             }
             StreamedAssistantContent::Reasoning(reasoning) => {
-                let text: String = reasoning
-                    .content
-                    .iter()
-                    .map(|rc| match rc {
-                        ReasoningContent::Text { text, .. } => text.as_str(),
-                        ReasoningContent::Summary(s) => s.as_str(),
-                        _ => "",
-                    })
-                    .collect();
-                ChatResponseChunk::Message(ChatResponseMessage::Thinking(text))
+                ChatResponseChunk::Message(ChatResponseMessage::Thinking(reasoning.display_text()))
             }
 
             StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {

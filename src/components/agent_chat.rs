@@ -1,3 +1,4 @@
+use iced::futures::Stream;
 use std::collections::HashMap;
 use std::{format, matches};
 use tracing::error;
@@ -5,14 +6,14 @@ use tracing::info;
 use uuid::Uuid;
 
 use iced::keyboard::key::{self};
+use iced::widget::operation;
 use iced::widget::space::{self, horizontal};
 use iced::widget::{
     button, column, container, pick_list, row, rule, scrollable, svg, text, text_editor,
 };
-use iced::widget::{markdown, operation};
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 
-use crate::components::chat_msg::{self, ChatMsg, ChatMsgMessage, Role};
+use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Role};
 use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{Tools, needs_approval};
@@ -225,63 +226,36 @@ impl AgentChat {
                 Task::none()
             }
             AgentChatMessage::Send => {
-                if !self.input.text().is_empty() && self.stream_id.is_none() {
-                    let input = self.input.text();
-                    info!("Send: input_len={}, stream_id=None", input.len());
+                operation::snap_to_end(iced::widget::Id::new("chat_messages")).chain(
+                    if !self.input.text().is_empty()
+                        && self.stream_id.is_none()
+                        && let Some(model) = self
+                            .chosen_model
+                            .clone()
+                            .or(self.config.default_model.clone())
+                    {
+                        let input = self.input.text();
+                        info!("Send: input_len={}, stream_id=None", input.len());
 
-                    self.messages.push(ChatMsg::new(Role::User, input));
-                    self.input.perform(text_editor::Action::SelectAll);
-                    self.input
-                        .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
+                        self.messages.push(ChatMsg::new(Role::User, input));
+                        self.input.perform(text_editor::Action::SelectAll);
+                        self.input
+                            .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
 
-                    self.tool_call_entries.clear();
-                    self.pending_tool_calls.clear();
+                        self.tool_call_entries.clear();
+                        self.pending_tool_calls.clear();
 
-                    let messages: Vec<ChatMessage> =
-                        self.messages.iter().map(|m| m.clone().into()).collect();
-                    let tm = self.tool_manager.clone();
+                        let messages: Vec<ChatMessage> =
+                            self.messages.iter().map(|msg| msg.clone().into()).collect();
+                        let tm = self.tool_manager.clone();
 
-                    self.stream_id = Some(Uuid::new_v4());
+                        self.stream_id = Some(Uuid::new_v4());
 
-                    let model = self
-                        .chosen_model
-                        .clone()
-                        .or(self.config.default_model.clone());
-
-                    info!("Model = {:?}, config = {:?}", model, self.config);
-
-                    if let Some(model) = model {
-                        Task::future(agent_client::prompt(
-                            self.config.clone(),
-                            model,
-                            messages,
-                            tm,
-                        ))
-                        .then(|request_result| match request_result {
-                            Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                                let message = match chat_response_chunk {
-                                    Ok(chunk) => {
-                                        if let ChatResponseChunk::Done = chunk {
-                                            AgentChatMessage::StreamFinished
-                                        } else {
-                                            AgentChatMessage::ChunkReceived(chunk)
-                                        }
-                                    }
-                                    Err(err) => AgentChatMessage::StreamError(err.to_string()),
-                                };
-                                message
-                            }),
-                            Err(err) => {
-                                info!("Request failed with {err}");
-                                Task::done(AgentChatMessage::StreamError(err.to_string()))
-                            }
-                        })
+                        self.prompt_agent(messages, tm, model)
                     } else {
                         Task::none()
-                    }
-                } else {
-                    Task::none()
-                }
+                    },
+                )
             }
             AgentChatMessage::MessageAction(_) => Task::none(),
             AgentChatMessage::ChunkReceived(chunk) => {
@@ -523,6 +497,27 @@ impl AgentChat {
         }
     }
 
+    fn prompt_agent(
+        &mut self,
+        messages: Vec<ChatMessage>,
+        tm: Tools,
+        model: String,
+    ) -> Task<AgentChatMessage> {
+        Task::future(agent_client::prompt(
+            self.config.clone(),
+            model,
+            messages,
+            tm,
+        ))
+        .then(|request_result| match request_result {
+            Ok(stream) => consume_stream(stream),
+            Err(err) => {
+                info!("Request failed with {err}");
+                Task::done(AgentChatMessage::StreamError(err.to_string()))
+            }
+        })
+    }
+
     pub fn streaming(&self) -> bool {
         self.stream_id.is_some()
     }
@@ -688,29 +683,9 @@ impl AgentChat {
             .chosen_model
             .clone()
             .or(self.config.default_model.clone());
+
         if let Some(model) = model {
-            Task::future(agent_client::prompt(
-                self.config.clone(),
-                model,
-                messages,
-                tm,
-            ))
-            .then(|request_result| match request_result {
-                Ok(stream) => Task::run(stream, |chat_response_chunk| {
-                    let message = match chat_response_chunk {
-                        Ok(chunk) => {
-                            if let ChatResponseChunk::Done = chunk {
-                                AgentChatMessage::StreamFinished
-                            } else {
-                                AgentChatMessage::ChunkReceived(chunk)
-                            }
-                        }
-                        Err(err) => AgentChatMessage::StreamError(err.to_string()),
-                    };
-                    message
-                }),
-                Err(err) => Task::done(AgentChatMessage::StreamError(err.to_string())),
-            })
+            self.prompt_agent(messages, tm, model)
         } else {
             Task::none()
         }
@@ -722,4 +697,14 @@ impl AgentChat {
             None => iced::widget::space().into(),
         }
     }
+}
+
+fn consume_stream<S: Stream<Item = Result<ChatResponseChunk, anyhow::Error>> + Send + 'static>(
+    stream: S,
+) -> Task<AgentChatMessage> {
+    Task::run(stream, |chat_response_chunk| match chat_response_chunk {
+        Ok(ChatResponseChunk::Done) => AgentChatMessage::StreamFinished,
+        Ok(chunk) => AgentChatMessage::ChunkReceived(chunk),
+        Err(err) => AgentChatMessage::StreamError(err.to_string()),
+    })
 }
