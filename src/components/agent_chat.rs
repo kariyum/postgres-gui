@@ -62,12 +62,12 @@ impl AgentChat {
         config: ConfiguredProvider,
         configs: Vec<ConnectionConfig>,
         pools: HashMap<String, sqlx::PgPool>,
-    ) -> (Self, Task<AgentChatMessage>) {
+    ) -> Self {
         let chosen_model = config.default_model.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(1000);
         let mut actor = DatabaseKeeper::new(configs, pools, rx);
         tokio::spawn(async move { actor.run().await });
-        let chat = Self {
+        Self {
             visible: false,
             input: text_editor::Content::default(),
             error: None,
@@ -79,8 +79,7 @@ impl AgentChat {
             pending_tool_calls: HashMap::new(),
             tool_call_entries: Vec::new(),
             chosen_model,
-        };
-        (chat, Task::none())
+        }
     }
 
     fn messages_view(&self) -> Element<'_, AgentChatMessage> {

@@ -279,7 +279,7 @@ impl App {
                     .iter()
                     .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
                     .collect();
-                let (chat, _task) = AgentChat::new(provider, configs, pools);
+                let chat = AgentChat::new(provider, configs, pools);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
                 Task::none()
