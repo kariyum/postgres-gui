@@ -13,7 +13,7 @@ use std::fmt;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::{error, info};
 
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::ToolSet;
@@ -145,9 +145,12 @@ impl Tools {
         pools: HashMap<String, PgPool>,
     ) {
         info!("Sending connections update to DatabaseKeeper actor!");
-        let _ = self
+        if let Err(err) = self
             .sender
-            .try_send(DbRequest::UpdateConnections { configs, pools });
+            .try_send(DbRequest::UpdateConnections { configs, pools })
+        {
+            error!("Failed to send UpdateConnections message to DatabaseKeeper: {err}");
+        }
     }
 
     pub async fn definitions(&self) -> Result<Vec<ToolDefinition>, ToolError> {
