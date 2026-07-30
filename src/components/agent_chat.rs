@@ -39,6 +39,7 @@ pub enum AgentChatMessage {
     },
     ModelSelected(String),
     ModelChanged(ConfiguredProvider),
+    ResetChat,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +149,18 @@ impl AgentChat {
             model_picker,
             button(
                 svg(svg::Handle::from_memory(include_bytes!(
+                    "../resources/rotate.svg"
+                )))
+                .height(14)
+                .width(14)
+            )
+            .on_press(AgentChatMessage::ResetChat)
+            .style(|_theme, _status| button::Style {
+                background: Some(iced::Background::Color(Color::TRANSPARENT)),
+                ..Default::default()
+            }),
+            button(
+                svg(svg::Handle::from_memory(include_bytes!(
                     "../resources/send.svg"
                 )))
                 .height(14)
@@ -250,6 +263,7 @@ impl AgentChat {
                         let tm = self.tool_manager.clone();
 
                         self.stream_id = Some(Uuid::new_v4());
+                        self.error = None;
 
                         self.prompt_agent(messages, tm, model)
                     } else {
@@ -494,6 +508,13 @@ impl AgentChat {
                 Task::done(AgentChatMessage::ModelChanged(self.config.clone()))
             }
             AgentChatMessage::ModelChanged(_) => Task::none(),
+            AgentChatMessage::ResetChat => {
+                if !self.streaming() {
+                    self.messages.clear();
+                    self.error = None;
+                }
+                Task::none()
+            }
         }
     }
 
