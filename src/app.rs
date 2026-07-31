@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 use iced::widget::space::horizontal;
-use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
+use iced::widget::{
+    Column, Scrollable, button, column, container, mouse_area, row, rule, scrollable, svg, text,
+};
 use iced::widget::{pane_grid, space};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
@@ -10,14 +12,14 @@ use tracing::{error, info};
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
-use crate::components::connection_item::ItemMessage;
+use crate::components::connection_item::{self, ItemMessage};
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::sidebar::{self, SidebarMessage};
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
-use crate::core::connection_config::ConnectionConfig;
+use crate::core::connection_config::{self, ConnectionConfig};
 use iced_aw::drop_down;
 
 use crate::theme;
@@ -50,6 +52,7 @@ pub enum Message {
     ToggleAgentMenu,
     CloseAgentMenu,
     AgentProviderSelected(ConfiguredProvider),
+    Connect(connection_config::Message),
 }
 
 #[derive(Debug)]
@@ -60,7 +63,7 @@ pub enum PaneKind {
 
 #[derive(Debug)]
 pub struct App {
-    pub manager: ConnectionManager,
+    pub connection_manager: ConnectionManager,
     pub dialog: ConnectionDialog,
     pub settings: SettingsDialog,
     pub agent_config: AgentConfig,
@@ -79,7 +82,7 @@ impl Default for App {
     fn default() -> Self {
         let (pane, _main_pane) = pane_grid::State::new(PaneKind::Main);
         Self {
-            manager: ConnectionManager::default(),
+            connection_manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
             settings: SettingsDialog::default(),
             agent_config: AgentConfig::default(),
@@ -112,10 +115,9 @@ impl App {
                     ConnManagerMessage::ConnectionItemMessage(id, item_msg),
                 )),
             },
-
             Message::ConnManager(msg) => {
                 use crate::connection_manager::Action;
-                match self.manager.update(msg) {
+                match self.connection_manager.update(msg) {
                     Action::None => {
                         self.sync_connections();
                         Task::none()
@@ -129,7 +131,6 @@ impl App {
                     }),
                 }
             }
-
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
@@ -152,7 +153,6 @@ impl App {
                     Task::none()
                 }
             }
-
             Message::ZoomIn => {
                 self.zoom_multiplier += 1;
                 self.pending_save = true;
@@ -170,7 +170,6 @@ impl App {
                 self.pending_save = true;
                 Task::none()
             }
-
             Message::Close => iced::exit(),
             Message::Drag => window::latest().and_then(window::drag),
             Message::DragResize(direction) => {
@@ -251,6 +250,10 @@ impl App {
                 Task::none()
             }
             Message::ToggleAgentMenu => {
+                if let Some(pane) = self.agent_chat_pane {
+                    self.panes.close(pane);
+                } else {
+                }
                 self.agent_menu_open = !self.agent_menu_open;
                 Task::none()
             }
@@ -269,14 +272,14 @@ impl App {
                 };
 
                 let configs: Vec<ConnectionConfig> = self
-                    .manager
+                    .connection_manager
                     .items
                     .iter()
                     .map(|connection_item| connection_item.cfg.clone())
                     .collect();
 
                 let pools: std::collections::HashMap<String, sqlx::PgPool> = self
-                    .manager
+                    .connection_manager
                     .items
                     .iter()
                     .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
@@ -299,12 +302,21 @@ impl App {
                 }
                 Task::none()
             }
+            Message::Connect(_) => {
+                info!("Got connect on config");
+                Task::none()
+            }
         }
     }
 
     fn save_config(&self) -> Task<Message> {
         let config = AppConfig {
-            connections: self.manager.items.iter().map(|i| i.cfg.clone()).collect(),
+            connections: self
+                .connection_manager
+                .items
+                .iter()
+                .map(|i| i.cfg.clone())
+                .collect(),
             zoom_multiplier: self.zoom_multiplier,
             agent_config: self.agent_config.clone(),
         };
@@ -446,14 +458,30 @@ impl App {
         })
     }
 
+    fn view_configs(&self) -> Element<'_, Message> {
+        scrollable(
+            Column::from_vec(
+                self.connection_manager
+                    .items
+                    .iter()
+                    .map(|item| item.cfg.view().map(Message::Connect).into())
+                    .collect(),
+            )
+            .spacing(12),
+        )
+        .into()
+    }
+
     fn view_welcome(&self) -> Element<'_, Message> {
-        let default = container(
+        container(
             column![
                 text("pgeru").size(48).font(iced::Font {
                     weight: iced::font::Weight::Bold,
                     ..iced::Font::DEFAULT
                 }),
                 text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
+                container(rule::horizontal(1)).width(400),
+                container(self.view_configs()).height(400)
             ]
             .spacing(6)
             .align_x(iced::Alignment::Center),
@@ -461,25 +489,31 @@ impl App {
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
-        default.into()
+        .align_y(iced::Alignment::Center)
+        .into()
     }
 
     fn view_main(&self) -> Element<'_, Message> {
-        let body: Element<Message> = if let Some(ref active_id) = self.manager.active_connection {
-            if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
-                item.view_editor().map(move |msg| {
-                    Message::ConnManager(ConnManagerMessage::ConnectionItemMessage(
-                        active_id.clone(),
-                        msg,
-                    ))
-                })
+        let body: Element<Message> =
+            if let Some(ref active_id) = self.connection_manager.active_connection {
+                if let Some(item) = self
+                    .connection_manager
+                    .items
+                    .iter()
+                    .find(|i| &i.cfg.id == active_id)
+                {
+                    item.view_editor().map(move |msg| {
+                        Message::ConnManager(ConnManagerMessage::ConnectionItemMessage(
+                            active_id.clone(),
+                            msg,
+                        ))
+                    })
+                } else {
+                    self.view_welcome()
+                }
             } else {
                 self.view_welcome()
-            }
-        } else {
-            self.view_welcome()
-        };
+            };
 
         body.into()
     }
@@ -659,14 +693,14 @@ impl App {
     fn sync_connections(&self) {
         info!("Sync connections...");
         let configs: Vec<ConnectionConfig> = self
-            .manager
+            .connection_manager
             .items
             .iter()
             .map(|connection_item| connection_item.cfg.clone())
             .collect();
 
         let pools: std::collections::HashMap<String, sqlx::PgPool> = self
-            .manager
+            .connection_manager
             .items
             .iter()
             .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))

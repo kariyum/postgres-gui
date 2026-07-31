@@ -1,3 +1,4 @@
+use iced::{Element, widget::button, widget::column, widget::text};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,6 +11,11 @@ pub struct ConnectionConfig {
     pub user: String,
     pub password: String,
     pub database: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum Message {
+    Connect(ConnectionConfig),
 }
 
 impl ConnectionConfig {
@@ -37,6 +43,15 @@ impl ConnectionConfig {
             "postgres://{}:{}@{}:{}/{}",
             self.user, self.password, self.host, self.port, self.database
         )
+    }
+
+    pub fn view(&self) -> Element<'_, Message> {
+        button(column![
+            text(&self.name),
+            text(self.connection_string()).size(12)
+        ])
+        .on_press(Message::Connect(self.clone()))
+        .into()
     }
 }
 
