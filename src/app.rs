@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
+use iced::widget::pane_grid;
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 use tracing::{error, info};
@@ -71,12 +71,12 @@ pub struct App {
     pub agent_menu_open: bool,
     pub pending_save: bool,
     panes: pane_grid::State<PaneKind>,
+    agent_chat_pane: Option<pane_grid::Pane>,
 }
 
 impl Default for App {
     fn default() -> Self {
-        let (mut panes, main_pane) = pane_grid::State::new(PaneKind::Main);
-        panes.split(pane_grid::Axis::Vertical, main_pane, PaneKind::AgentChat);
+        let (pane, _main_pane) = pane_grid::State::new(PaneKind::Main);
         Self {
             manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
@@ -89,7 +89,8 @@ impl Default for App {
             menu_open: false,
             agent_menu_open: false,
             pending_save: false,
-            panes,
+            panes: pane,
+            agent_chat_pane: None,
         }
     }
 }
@@ -282,6 +283,12 @@ impl App {
                 let chat = AgentChat::new(provider, configs, pools);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
+                let main_pane = self.panes.iter().find(|(_, state)| matches!(state, PaneKind::Main)).map(|(pane, _)| *pane);
+                if let Some(main_pane) = main_pane {
+                    if let Some((agent_pane, _split)) = self.panes.split(pane_grid::Axis::Vertical, main_pane, PaneKind::AgentChat) {
+                        self.agent_chat_pane = Some(agent_pane);
+                    }
+                }
                 Task::none()
             }
         }
@@ -361,23 +368,18 @@ impl App {
 
     pub fn view(&self) -> Element<'_, Message> {
         let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
-        let content_area: Element<Message> = match self.agent_chat {
-            Some(ref agent_chat) => {
-                pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
-                    PaneKind::Main => pane_grid::Content::new(self.view_main()),
-                    PaneKind::AgentChat => pane_grid::Content::new(row![
-                        rule::vertical(1),
-                        agent_chat.view().map(Message::AgentChat)
-                    ]),
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .spacing(0)
-                .on_resize(10, |event| Message::Resized(event))
-                .into()
-            }
-            None => self.view_main().into(),
-        };
+        let content_area: Element<Message> =
+            pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
+                PaneKind::Main => pane_grid::Content::new(self.view_main()),
+                PaneKind::AgentChat => pane_grid::Content::new(
+                    row![rule::vertical(1), self.agent_chat.as_ref().unwrap().view().map(Message::AgentChat)]
+                ),
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(0)
+            .on_resize(5, |event| Message::Resized(event))
+            .into();
 
         let layout = container(column![
             self.view_title_bar(),
@@ -387,7 +389,9 @@ impl App {
         ])
         .style(|_theme: &Theme| -> container::Style {
             container::Style::default()
-                .background(iced::Background::Color(_theme.palette().background.base.color))
+                .background(iced::Background::Color(
+                    _theme.palette().background.base.color,
+                ))
                 .border(iced::Border::default().rounded(12))
         });
 
