@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
-use iced::widget::pane_grid;
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 use tracing::{error, info};
@@ -283,9 +283,16 @@ impl App {
                 let chat = AgentChat::new(provider, configs, pools);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
-                let main_pane = self.panes.iter().find(|(_, state)| matches!(state, PaneKind::Main)).map(|(pane, _)| *pane);
+                let main_pane = self
+                    .panes
+                    .iter()
+                    .find(|(_, state)| matches!(state, PaneKind::Main))
+                    .map(|(pane, _)| *pane);
                 if let Some(main_pane) = main_pane {
-                    if let Some((agent_pane, _split)) = self.panes.split(pane_grid::Axis::Vertical, main_pane, PaneKind::AgentChat) {
+                    if let Some((agent_pane, _split)) =
+                        self.panes
+                            .split(pane_grid::Axis::Vertical, main_pane, PaneKind::AgentChat)
+                    {
                         self.agent_chat_pane = Some(agent_pane);
                     }
                 }
@@ -329,18 +336,6 @@ impl App {
         window::resize_events().map(|(id, _size)| Message::WindowResized(id))
     }
 
-    fn resize_handle(
-        direction: window::Direction,
-        interaction: mouse::Interaction,
-        width: Length,
-        height: Length,
-    ) -> Element<'static, Message> {
-        mouse_area(container("").width(width).height(height))
-            .on_press(Message::DragResize(direction))
-            .interaction(interaction)
-            .into()
-    }
-
     pub fn view_footer(&self) -> Element<'_, Message> {
         let agent_btn = button(
             svg(svg::Handle::from_memory(include_bytes!(
@@ -367,23 +362,14 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let sidebar = sidebar::view(&self.manager.items).map(Message::Sidebar);
-        let content_area: Element<Message> =
-            pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
-                PaneKind::Main => pane_grid::Content::new(self.view_main()),
-                PaneKind::AgentChat => pane_grid::Content::new(
-                    row![rule::vertical(1), self.agent_chat.as_ref().unwrap().view().map(Message::AgentChat)]
-                ),
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .spacing(0)
-            .on_resize(5, |event| Message::Resized(event))
-            .into();
+        let content_area = self.content_area();
+        let connection_manager_dialog = self.view_connection_manager_dialog();
+        let settings_dialog = self.view_settings_dialog();
+        let dialog = connection_manager_dialog.or(settings_dialog);
 
         let layout = container(column![
             self.view_title_bar(),
-            row![sidebar, iced::widget::rule::vertical(1), content_area,],
+            content_area,
             rule::horizontal(1.0),
             self.view_footer()
         ])
@@ -395,36 +381,8 @@ impl App {
                 .border(iced::Border::default().rounded(12))
         });
 
-        let content: Element<'_, Message> = if let Some(dialog) = self.dialog.view() {
-            iced::widget::stack![
-                layout,
-                container(dialog.map(|msg| {
-                    Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(msg))
-                }))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
-                .style(|_: &Theme| iced::widget::container::Style {
-                    background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                    ..Default::default()
-                }),
-            ]
-            .into()
-        } else if let Some(dialog) = self.settings.view() {
-            iced::widget::stack![
-                layout,
-                container(dialog.map(Message::Settings))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_x(iced::Alignment::Center)
-                    .align_y(iced::Alignment::Center)
-                    .style(|_: &Theme| iced::widget::container::Style {
-                        background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                        ..Default::default()
-                    }),
-            ]
-            .into()
+        let content: Element<'_, Message> = if let Some(dialog) = dialog {
+            iced::widget::stack![layout, dialog].into()
         } else {
             layout.into()
         };
@@ -432,88 +390,59 @@ impl App {
         if self.is_maximized {
             content.into()
         } else {
-            let h = Length::Fixed(6.0);
-            iced::widget::stack![
-                content,
-                container(Self::resize_handle(
-                    window::Direction::North,
-                    mouse::Interaction::ResizingVertically,
-                    Length::Fill,
-                    h,
-                ))
-                .width(Length::Fill)
-                .height(h)
-                .align_y(iced::Alignment::Start),
-                container(Self::resize_handle(
-                    window::Direction::South,
-                    mouse::Interaction::ResizingVertically,
-                    Length::Fill,
-                    h,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_y(iced::Alignment::End),
-                container(Self::resize_handle(
-                    window::Direction::West,
-                    mouse::Interaction::ResizingHorizontally,
-                    h,
-                    Length::Fill,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Start),
-                container(Self::resize_handle(
-                    window::Direction::East,
-                    mouse::Interaction::ResizingHorizontally,
-                    h,
-                    Length::Fill,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::End),
-                container(Self::resize_handle(
-                    window::Direction::NorthWest,
-                    mouse::Interaction::ResizingDiagonallyDown,
-                    h,
-                    h,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Start)
-                .align_y(iced::Alignment::Start),
-                container(Self::resize_handle(
-                    window::Direction::NorthEast,
-                    mouse::Interaction::ResizingDiagonallyUp,
-                    h,
-                    h,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::End)
-                .align_y(iced::Alignment::Start),
-                container(Self::resize_handle(
-                    window::Direction::SouthWest,
-                    mouse::Interaction::ResizingDiagonallyUp,
-                    h,
-                    h,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Start)
-                .align_y(iced::Alignment::End),
-                container(Self::resize_handle(
-                    window::Direction::SouthEast,
-                    mouse::Interaction::ResizingDiagonallyDown,
-                    h,
-                    h,
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::End)
-                .align_y(iced::Alignment::End),
-            ]
-            .into()
+            add_window_resize_mouse_interactions(content)
         }
+    }
+
+    fn content_area(&self) -> Element<'_, Message> {
+        pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
+            PaneKind::Main => pane_grid::Content::new(self.view_main()),
+            PaneKind::AgentChat => pane_grid::Content::new(row![
+                rule::vertical(1),
+                self.agent_chat
+                    .as_ref()
+                    .unwrap()
+                    .view()
+                    .map(Message::AgentChat)
+            ]),
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0)
+        .on_resize(5, |event| Message::Resized(event))
+        .into()
+    }
+
+    fn view_settings_dialog(&self) -> Option<container::Container<'_, Message>> {
+        self.settings.view().map(|dialog| {
+            container(dialog.map(Message::Settings))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .style(|_: &Theme| iced::widget::container::Style {
+                    background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                    ..Default::default()
+                })
+        })
+    }
+
+    fn view_connection_manager_dialog(&self) -> Option<container::Container<'_, Message>> {
+        self.dialog.view().map(|dialog| {
+            container(
+                dialog.map(|msg| {
+                    Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(msg))
+                }),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .style(|_: &Theme| iced::widget::container::Style {
+                background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                ..Default::default()
+            })
+        })
     }
 
     fn view_main(&self) -> Element<'_, Message> {
@@ -728,4 +657,100 @@ impl App {
             agent_chat.update_connections(configs, pools);
         }
     }
+}
+
+fn add_window_resize_mouse_interactions(content: Element<'_, Message>) -> Element<'_, Message> {
+    let h = Length::Fixed(6.0);
+    iced::widget::stack![
+        content,
+        container(resize_handle(
+            window::Direction::North,
+            mouse::Interaction::ResizingVertically,
+            Length::Fill,
+            h,
+        ))
+        .width(Length::Fill)
+        .height(h)
+        .align_y(iced::Alignment::Start),
+        container(resize_handle(
+            window::Direction::South,
+            mouse::Interaction::ResizingVertically,
+            Length::Fill,
+            h,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(iced::Alignment::End),
+        container(resize_handle(
+            window::Direction::West,
+            mouse::Interaction::ResizingHorizontally,
+            h,
+            Length::Fill,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Start),
+        container(resize_handle(
+            window::Direction::East,
+            mouse::Interaction::ResizingHorizontally,
+            h,
+            Length::Fill,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::End),
+        container(resize_handle(
+            window::Direction::NorthWest,
+            mouse::Interaction::ResizingDiagonallyDown,
+            h,
+            h,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Start)
+        .align_y(iced::Alignment::Start),
+        container(resize_handle(
+            window::Direction::NorthEast,
+            mouse::Interaction::ResizingDiagonallyUp,
+            h,
+            h,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::End)
+        .align_y(iced::Alignment::Start),
+        container(resize_handle(
+            window::Direction::SouthWest,
+            mouse::Interaction::ResizingDiagonallyUp,
+            h,
+            h,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Start)
+        .align_y(iced::Alignment::End),
+        container(resize_handle(
+            window::Direction::SouthEast,
+            mouse::Interaction::ResizingDiagonallyDown,
+            h,
+            h,
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::End)
+        .align_y(iced::Alignment::End),
+    ]
+    .into()
+}
+
+fn resize_handle(
+    direction: window::Direction,
+    interaction: mouse::Interaction,
+    width: Length,
+    height: Length,
+) -> Element<'static, Message> {
+    mouse_area(container("").width(width).height(height))
+        .on_press(Message::DragResize(direction))
+        .interaction(interaction)
+        .into()
 }
