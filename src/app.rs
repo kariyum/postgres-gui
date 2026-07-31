@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, mouse_area, row, rule, svg, text};
+use iced::widget::{pane_grid, space};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 use tracing::{error, info};
@@ -13,13 +13,14 @@ use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::components::sidebar::{self, SidebarMessage};
-use crate::components::welcome_view;
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::connection_config::ConnectionConfig;
 use iced_aw::drop_down;
+
+use crate::theme;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -445,6 +446,25 @@ impl App {
         })
     }
 
+    fn view_welcome(&self) -> Element<'_, Message> {
+        let default = container(
+            column![
+                text("pgeru").size(48).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
+                text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
+            ]
+            .spacing(6)
+            .align_x(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+        default.into()
+    }
+
     fn view_main(&self) -> Element<'_, Message> {
         let body: Element<Message> = if let Some(ref active_id) = self.manager.active_connection {
             if let Some(item) = self.manager.items.iter().find(|i| &i.cfg.id == active_id) {
@@ -455,13 +475,13 @@ impl App {
                     ))
                 })
             } else {
-                welcome_view::view()
+                self.view_welcome()
             }
         } else {
-            welcome_view::view()
+            self.view_welcome()
         };
 
-        container(body).height(Length::Fill).into()
+        body.into()
     }
 
     fn view_title_bar(&self) -> Element<'_, Message> {

@@ -6,5 +6,4 @@ pub mod connection_item;
 pub mod schema_tree;
 pub mod sidebar;
 pub mod tool_call_entry;
-pub mod welcome_view;
 pub mod provider_config;
