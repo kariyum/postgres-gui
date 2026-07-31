@@ -125,7 +125,7 @@ fn tree_node_message(
 }
 
 fn tree_button_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
+    let palette = theme.palette();
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
             background: Some(palette.primary.weak.color.into()),

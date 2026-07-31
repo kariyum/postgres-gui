@@ -111,21 +111,22 @@ impl AgentChat {
             .or_else(|| self.config.default_model.clone());
 
         let model_picker: Element<'_, AgentChatMessage> = pick_list(
-            self.config.available_models.clone(),
             default_model,
-            AgentChatMessage::ModelSelected,
+            self.config.available_models.clone(),
+            |s: &String| s.clone(),
         )
+        .on_select(AgentChatMessage::ModelSelected)
         .placeholder("Select model")
         .text_size(12)
         .menu_height(150.0)
         .width(Length::Shrink)
         .style(|theme: &iced::Theme, status| {
-            let palette = theme.extended_palette();
+            let palette = theme.palette();
             let bg = match status {
                 pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
                     iced::Background::Color(palette.background.weak.color)
                 }
-                pick_list::Status::Active => {
+                pick_list::Status::Active | pick_list::Status::Disabled => {
                     iced::Background::Color(palette.background.weakest.color)
                 }
             };
@@ -173,7 +174,7 @@ impl AgentChat {
         ])
         .style(|_theme: &Theme| container::Style {
             background: Some(Background::Color(
-                _theme.extended_palette().background.weakest.color,
+                _theme.palette().background.weak.color,
             )),
             ..Default::default()
         })
@@ -198,7 +199,7 @@ impl AgentChat {
                 _ => text_editor::Binding::from_key_press(event),
             })
             .style(|_theme: &Theme, _status| text_editor::Style {
-                background: Background::Color(_theme.extended_palette().background.weakest.color),
+                background: Background::Color(_theme.palette().background.weak.color),
                 border: Border {
                     color: Color::TRANSPARENT,
                     radius: iced::border::Radius::new(0),
@@ -206,8 +207,7 @@ impl AgentChat {
                 },
                 ..text_editor::default(_theme, _status)
             })
-            .min_height(80)
-            .max_height(200)
+            .height(Length::Fixed(120.0))
             .into()
     }
 

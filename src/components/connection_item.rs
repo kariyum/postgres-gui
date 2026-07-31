@@ -177,7 +177,7 @@ impl ConnectionItem {
         .on_press(ItemMessage::Select)
         .width(Length::Fill)
         .style(move |theme: &Theme, status| {
-            let palette = theme.extended_palette();
+            let palette = theme.palette();
             if self.connection_status == ConnectionStatus::Connected {
                 button::Style {
                     background: Some(color!(0x155c2b, 0.2).into()),
@@ -378,7 +378,7 @@ impl ConnectionItem {
                 }),
         )
         .style(|theme: &Theme| {
-            let palette = theme.extended_palette();
+            let palette = theme.palette();
             iced::widget::container::Style {
                 background: Some(palette.background.base.color.into()),
                 border: iced::Border {
@@ -552,7 +552,7 @@ impl ConnectionItem {
             container(header_row)
                 .width(Length::Fill)
                 .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
+                    let palette = theme.palette();
                     iced::widget::container::Style {
                         background: Some(palette.background.strong.color.into()),
                         ..Default::default()
@@ -598,7 +598,7 @@ impl ConnectionItem {
             }
 
             let row_bg_style = move |theme: &Theme| {
-                let palette = theme.extended_palette();
+                let palette = theme.palette();
                 iced::widget::container::Style {
                     background: Some(if is_even {
                         palette.background.base.color.into()

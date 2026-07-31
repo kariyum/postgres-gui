@@ -118,7 +118,7 @@ impl SettingsDialog {
         Some(
             container(form)
                 .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
+                    let palette = theme.palette();
                     container::Style {
                         background: Some(palette.background.base.color.into()),
                         border: iced::Border {

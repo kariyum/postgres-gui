@@ -187,7 +187,7 @@ impl ConnectionManager {
 
     fn handle_copy_string_requested(&self, id: &str) -> Action {
         if let Some(item) = self.items.iter().find(|i| i.cfg.id == id) {
-            Action::Run(iced::clipboard::write(item.cfg.connection_string()))
+            Action::Run(iced::clipboard::write(item.cfg.connection_string()).map(|_| ConnManagerMessage::ConnectionSaved(Ok(()))))
         } else {
             Action::None
         }

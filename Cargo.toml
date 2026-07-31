@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "0.14.0", features = ["svg", "tokio", "highlighter", "markdown"] }
+iced = { version = "0.15.0-dev", features = ["svg", "tokio", "highlighter", "markdown"] }
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "tls-native-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
-iced_aw = { version = "0.14.1", features = ["context_menu", "drop_down"] }
+iced_aw = { git = "https://github.com/tsuza/iced_aw", rev = "a9301708a4d008dc17f63cbbbb2b2aa06e0e7352", features = ["context_menu", "drop_down"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
 anyhow = "1.0.103"
@@ -19,3 +19,8 @@ dirs = "6.0.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing-appender = "0.2.5"
+
+[patch.crates-io]
+iced = { git = "https://github.com/kariyum/iced", rev = "3c81aac2e1b48125efdf0c996fbbb9c72c06ae50" }
+iced_core = { git = "https://github.com/kariyum/iced", rev = "3c81aac2e1b48125efdf0c996fbbb9c72c06ae50" }
+iced_widget = { git = "https://github.com/kariyum/iced", rev = "3c81aac2e1b48125efdf0c996fbbb9c72c06ae50" }

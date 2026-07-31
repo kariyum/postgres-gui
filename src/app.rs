@@ -387,7 +387,7 @@ impl App {
         ])
         .style(|_theme: &Theme| -> container::Style {
             container::Style::default()
-                .background(iced::Background::Color(_theme.palette().background))
+                .background(iced::Background::Color(_theme.palette().background.base.color))
                 .border(iced::Border::default().rounded(12))
         });
 
@@ -583,7 +583,7 @@ impl App {
         ])
         .style(|theme: &Theme| container::Style {
             background: Some(iced::Background::Color(
-                theme.extended_palette().background.strong.color,
+                theme.palette().background.strong.color,
             )),
             ..Default::default()
         })
@@ -640,7 +640,7 @@ impl App {
         .width(150)
         .style(|theme: &Theme| container::Style {
             background: Some(iced::Background::Color(
-                theme.extended_palette().background.strong.color,
+                theme.palette().background.strong.color,
             )),
             border: iced::Border::default().rounded(4),
             ..Default::default()
@@ -695,7 +695,7 @@ impl App {
             .width(100)
             .style(|theme: &Theme| container::Style {
                 background: Some(iced::Background::Color(
-                    theme.extended_palette().background.weaker.color,
+                    theme.palette().background.weak.color,
                 )),
                 border: iced::Border::default().rounded(4),
                 ..Default::default()

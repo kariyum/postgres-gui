@@ -1,6 +1,6 @@
 use iced::border::Radius;
 use iced::widget::{button, column, container, row, text};
-use iced::{Background, Border, Color, Element, Theme};
+use iced::{Background, Border, Color, Element, Length, Theme};
 
 use crate::components::agent_chat::AgentChatMessage;
 
@@ -154,7 +154,7 @@ impl ToolCallEntry {
                 },
                 ..Default::default()
             })
-            .max_width(500)
+            .width(Length::Fixed(500.0))
             .into()
     }
 }
