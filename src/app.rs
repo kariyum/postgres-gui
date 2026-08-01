@@ -481,7 +481,7 @@ impl App {
                 }),
                 text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
                 container(rule::horizontal(1)).width(400),
-                container(self.view_configs()).height(400)
+                container(self.view_configs()).height(Length::Fit.max(400.0))
             ]
             .spacing(6)
             .align_x(iced::Alignment::Center),
