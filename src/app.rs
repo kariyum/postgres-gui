@@ -1,20 +1,20 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{
-    Column, Scrollable, button, column, container, mouse_area, row, rule, scrollable, svg, text,
+    Column, button, column, container, mouse_area, row, rule, scrollable, svg, text,
 };
-use iced::widget::{pane_grid, space};
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 use tracing::{error, info};
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
 use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
-use crate::components::connection_item::{self, ItemMessage};
+use crate::components::connection_item::ItemMessage;
+use crate::components::editor::{self, Editor, EditorConfig};
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
-use crate::components::sidebar::{self, SidebarMessage};
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::config_loader::{self, AppConfig};
@@ -26,7 +26,6 @@ use crate::theme;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Sidebar(SidebarMessage),
     ConnManager(ConnManagerMessage),
     Close,
     Drag,
@@ -52,7 +51,8 @@ pub enum Message {
     ToggleAgentMenu,
     CloseAgentMenu,
     AgentProviderSelected(ConfiguredProvider),
-    Connect(connection_config::Message),
+    ConnectionConfig(connection_config::Message),
+    Editor(editor::Message),
 }
 
 #[derive(Debug)]
@@ -76,6 +76,7 @@ pub struct App {
     pub pending_save: bool,
     panes: pane_grid::State<PaneKind>,
     agent_chat_pane: Option<pane_grid::Pane>,
+    editor: Editor,
 }
 
 impl Default for App {
@@ -95,6 +96,7 @@ impl Default for App {
             pending_save: false,
             panes: pane,
             agent_chat_pane: None,
+            editor: Editor::default(),
         }
     }
 }
@@ -102,19 +104,12 @@ impl Default for App {
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Editor(msg) => self.editor.update(msg).map(Message::Editor),
             Message::AddConnection => {
                 Task::done(Message::CloseMenu).chain(Task::done(Message::ConnManager(
                     ConnManagerMessage::ConnectionDialogMessage(DialogMessage::OpenNew),
                 )))
             }
-            Message::Sidebar(msg) => match msg {
-                SidebarMessage::SelectConnection(id) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(id, ItemMessage::Select),
-                )),
-                SidebarMessage::ItemMessage(id, item_msg) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(id, item_msg),
-                )),
-            },
             Message::ConnManager(msg) => {
                 use crate::connection_manager::Action;
                 match self.connection_manager.update(msg) {
@@ -302,13 +297,13 @@ impl App {
                 }
                 Task::none()
             }
-            Message::Connect(msg) => match msg {
-                connection_config::Message::Connect(cfg) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(
-                        cfg.id,
-                        ItemMessage::ConnectRequested,
-                    ),
-                )),
+            Message::ConnectionConfig(msg) => match msg {
+                connection_config::Message::Connect(cfg) => {
+                    // maybe init a connection here for the default database? maybe add fetches databases to config for faster login and error out when database not found
+                    Task::done(Message::Editor(editor::Message::Add(EditorConfig::new(
+                        cfg,
+                    ))))
+                }
                 connection_config::Message::Edit(cfg) => Task::done(Message::ConnManager(
                     ConnManagerMessage::ConnectionItemMessage(cfg.id, ItemMessage::EditRequested),
                 )),
@@ -487,7 +482,7 @@ impl App {
                     self.connection_manager
                         .items
                         .iter()
-                        .map(|item| item.cfg.view().map(Message::Connect).into())
+                        .map(|item| item.cfg.view().map(Message::ConnectionConfig).into())
                         .collect(),
                 )
                 .spacing(12),
@@ -525,26 +520,11 @@ impl App {
     }
 
     fn view_main(&self) -> Element<'_, Message> {
-        let body: Element<Message> =
-            if let Some(ref active_id) = self.connection_manager.active_connection {
-                if let Some(item) = self
-                    .connection_manager
-                    .items
-                    .iter()
-                    .find(|i| &i.cfg.id == active_id)
-                {
-                    item.view_editor().map(move |msg| {
-                        Message::ConnManager(ConnManagerMessage::ConnectionItemMessage(
-                            active_id.clone(),
-                            msg,
-                        ))
-                    })
-                } else {
-                    self.view_welcome()
-                }
-            } else {
-                self.view_welcome()
-            };
+        let body: Element<Message> = if let Some(editor) = self.editor.view() {
+            editor.map(Message::Editor)
+        } else {
+            self.view_welcome()
+        };
 
         body.into()
     }
