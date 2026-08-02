@@ -1,7 +1,7 @@
 use crate::core::connection_config::ConnectionConfig;
 use iced::{
     Element, Length, Theme, alignment,
-    widget::{button, row, svg, text},
+    widget::{button, container, row, svg, text},
 };
 
 #[derive(Debug, Clone)]
@@ -67,5 +67,12 @@ impl EditorConfig {
             ..button::background(_theme, _status)
         })
         .into()
+    }
+
+    pub fn view_editor(&self) -> Element<'_, Message> {
+        container("Placeholder")
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }

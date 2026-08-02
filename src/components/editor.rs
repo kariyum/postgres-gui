@@ -1,15 +1,10 @@
+use anyhow::Context;
 use iced::{
     Element, Length, Task,
-    widget::{Row, column, container, row, rule},
+    widget::{Row, column, container, space},
 };
 
-use crate::{
-    components::{
-        editor,
-        editor_config::{self, EditorConfig},
-    },
-    core::connection_config::{self, ConnectionConfig},
-};
+use crate::components::editor_config::{self, EditorConfig};
 
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -22,7 +17,7 @@ pub enum Message {
     Add(EditorConfig),
     Close(EditorConfig),
     Focus(EditorConfig),
-    EditorConfigMessage(editor_config::Message),
+    EditorConfigMessage(EditorConfig, editor_config::Message), // TODO track only window ID
 }
 
 impl Default for Editor {
@@ -55,13 +50,28 @@ impl Editor {
     }
 
     fn view_editor(&self) -> Element<'_, Message> {
-        column![
-            self.view_header(),
-            container("Editor here")
+        let window = self
+            .windows
+            .get(self.focused_tab_index.unwrap_or(0))
+            .context("Did not find EditorConfig in self.windows");
+        match window {
+            Ok(window) => column![
+                self.view_header(),
+                container(
+                    window
+                        .view_editor()
+                        .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
+                )
                 .width(Length::Fill)
                 .height(Length::Fill)
-        ]
-        .into()
+            ]
+            .into(),
+
+            Err(err) => {
+                tracing::error!("{err}");
+                return space().into();
+            }
+        }
     }
 
     fn view_header(&self) -> Element<'_, Message> {
@@ -72,7 +82,7 @@ impl Editor {
                     .map(|window| {
                         window
                             .view_header()
-                            .map(Message::EditorConfigMessage)
+                            .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
                             .into()
                     })
                     .collect(),
@@ -109,7 +119,10 @@ impl Editor {
                 }
                 Task::none()
             }
-            Message::EditorConfigMessage(msg) => Task::none(), // TODO update me
+            Message::EditorConfigMessage(editor_config, msg) => match msg {
+                editor_config::Message::Select => Task::done(Message::Focus(editor_config)),
+                editor_config::Message::Close => Task::done(Message::Close(editor_config)),
+            },
         }
     }
 }
