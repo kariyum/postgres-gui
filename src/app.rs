@@ -302,10 +302,26 @@ impl App {
                 }
                 Task::none()
             }
-            Message::Connect(_) => {
-                info!("Got connect on config");
-                Task::none()
-            }
+            Message::Connect(msg) => match msg {
+                connection_config::Message::Connect(cfg) => Task::done(Message::ConnManager(
+                    ConnManagerMessage::ConnectionItemMessage(
+                        cfg.id,
+                        ItemMessage::ConnectRequested,
+                    ),
+                )),
+                connection_config::Message::Edit(cfg) => Task::done(Message::ConnManager(
+                    ConnManagerMessage::ConnectionItemMessage(cfg.id, ItemMessage::EditRequested),
+                )),
+                connection_config::Message::Duplicate(cfg) => Task::done(Message::ConnManager(
+                    ConnManagerMessage::ConnectionItemMessage(
+                        cfg.id,
+                        ItemMessage::DuplicateRequested,
+                    ),
+                )),
+                connection_config::Message::Delete(cfg) => Task::done(Message::ConnManager(
+                    ConnManagerMessage::ConnectionItemMessage(cfg.id, ItemMessage::DeleteRequested),
+                )),
+            },
         }
     }
 
@@ -459,31 +475,46 @@ impl App {
     }
 
     fn view_configs(&self) -> Element<'_, Message> {
-        scrollable(
-            Column::from_vec(
-                self.connection_manager
-                    .items
-                    .iter()
-                    .map(|item| item.cfg.view().map(Message::Connect).into())
-                    .collect(),
+        if self.connection_manager.items.is_empty() {
+            button("Add Connection")
+                .on_press(Message::AddConnection)
+                .padding([8, 12])
+                .width(Length::Fill)
+                .into()
+        } else {
+            scrollable(
+                Column::from_vec(
+                    self.connection_manager
+                        .items
+                        .iter()
+                        .map(|item| item.cfg.view().map(Message::Connect).into())
+                        .collect(),
+                )
+                .spacing(12),
             )
-            .spacing(12),
-        )
-        .into()
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new().width(4).scroller_width(4),
+            ))
+            .into()
+        }
     }
 
     fn view_welcome(&self) -> Element<'_, Message> {
         container(
             column![
-                text("pgeru").size(48).font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::DEFAULT
-                }),
-                text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
+                column![
+                    text("pgeru").size(48).font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
+                    text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
+                ],
                 container(rule::horizontal(1)).width(400),
-                container(self.view_configs()).height(Length::Fit.max(400.0))
+                container(self.view_configs())
+                    .width(Length::Fit.max(400.0))
+                    .height(Length::Fit.max(400.0))
             ]
-            .spacing(6)
+            .spacing(10)
             .align_x(iced::Alignment::Center),
         )
         .width(Length::Fill)

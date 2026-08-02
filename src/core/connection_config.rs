@@ -1,9 +1,12 @@
 use iced::{
-    Color, Element, Length,
+    Element, Length, Theme,
     widget::{button, column, container, text},
 };
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use uuid::Uuid;
+
+use crate::theme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
@@ -19,9 +22,9 @@ pub struct ConnectionConfig {
 #[derive(Clone, Debug)]
 pub enum Message {
     Connect(ConnectionConfig),
-    EditRequested(ConnectionConfig),
-    DuplicateRequested(ConnectionConfig),
-    DeleteRequested(ConnectionConfig),
+    Edit(ConnectionConfig),
+    Duplicate(ConnectionConfig),
+    Delete(ConnectionConfig),
 }
 
 impl ConnectionConfig {
@@ -54,9 +57,9 @@ impl ConnectionConfig {
     fn view_context_menu(&self) -> Element<'_, Message> {
         container(column![
             context_button("Connect", Message::Connect(self.clone())),
-            context_button("Edit", Message::EditRequested(self.clone())),
-            context_button("Duplicate", Message::DuplicateRequested(self.clone())),
-            context_button("Delete", Message::DeleteRequested(self.clone())),
+            context_button("Edit", Message::Edit(self.clone())),
+            context_button("Duplicate", Message::Duplicate(self.clone())),
+            context_button("Delete", Message::Delete(self.clone())),
         ])
         .width(150)
         .into()
@@ -64,11 +67,37 @@ impl ConnectionConfig {
 
     pub fn view(&self) -> Element<'_, Message> {
         iced_aw::ContextMenu::new(
-            button(column![
-                text(&self.name),
-                text(self.connection_string()).size(12)
-            ])
-            .on_press(Message::Connect(self.clone())),
+            button(
+                column![
+                    text(&self.name).size(14).font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
+                    text(format!("{}/{}", self.user, self.database))
+                        .size(11)
+                        .color(theme::TEXT_MUTED)
+                ]
+                .spacing(2),
+            )
+            .on_press(Message::Connect(self.clone()))
+            .padding([8, 12])
+            .width(Length::Fill)
+            .style(|theme: &Theme, status| {
+                let palette = theme.palette();
+                button::Style {
+                    background: Some(if matches!(status, button::Status::Hovered) {
+                        palette.background.weak.color.into()
+                    } else {
+                        palette.background.base.color.into()
+                    }),
+                    border: iced::Border::default()
+                        .rounded(4)
+                        .color(palette.background.weak.color)
+                        .width(1.0),
+                    text_color: palette.background.base.text,
+                    ..Default::default()
+                }
+            }),
             || self.view_context_menu(),
         )
         .into()
@@ -84,11 +113,6 @@ fn context_button(
         .on_press(msg)
         .width(Length::Fill)
         .style(|_theme, _status| button::Style {
-            border: iced::Border {
-                radius: 0.0.into(),
-                width: 0.0,
-                color: Color::TRANSPARENT,
-            },
             ..button::subtle(_theme, _status)
         })
 }
