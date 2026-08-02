@@ -3,6 +3,7 @@ pub mod chat_msg;
 pub mod connection_dialog;
 pub mod connection_item;
 pub mod editor;
+pub mod editor_config;
 pub mod provider_config;
 pub mod schema_tree;
 pub mod settings_dialog;

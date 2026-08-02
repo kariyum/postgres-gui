@@ -1,26 +1,15 @@
-use iced::{Element, Length, Task, widget::container};
-
-use crate::{
-    components::editor,
-    core::connection_config::{self, ConnectionConfig},
+use iced::{
+    Element, Length, Task,
+    widget::{Row, column, container, row, rule},
 };
 
-#[derive(Debug, Clone)]
-pub struct EditorConfig {
-    config: ConnectionConfig,
-    // database_keeper:
-    // query result
-    // query filters
-    // query state (idle, running, finished ...)
-}
-
-impl EditorConfig {
-    pub fn new(connection_config: ConnectionConfig) -> Self {
-        Self {
-            config: connection_config,
-        }
-    }
-}
+use crate::{
+    components::{
+        editor,
+        editor_config::{self, EditorConfig},
+    },
+    core::connection_config::{self, ConnectionConfig},
+};
 
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -33,6 +22,7 @@ pub enum Message {
     Add(EditorConfig),
     Close(EditorConfig),
     Focus(EditorConfig),
+    EditorConfigMessage(editor_config::Message),
 }
 
 impl Default for Editor {
@@ -46,21 +36,59 @@ impl Default for Editor {
 
 impl Editor {
     fn index_of(&self, editor_config: EditorConfig) -> Option<usize> {
-        self.windows.iter().position(|config| {
-            config.config.connection_string() == editor_config.config.connection_string()
-        })
+        self.windows
+            .iter()
+            .position(|config| config.connection_string() == editor_config.connection_string())
     }
+
     pub fn view(&self) -> Option<Element<'_, Message>> {
         if self.windows.is_empty() {
             None
         } else {
             Some(
-                container("Hi I'm the editor")
+                container(self.view_editor())
                     .height(Length::Fill)
                     .width(Length::Fill)
                     .into(),
             )
         }
+    }
+
+    fn view_editor(&self) -> Element<'_, Message> {
+        column![
+            self.view_header(),
+            container("Editor here")
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ]
+        .into()
+    }
+
+    fn view_header(&self) -> Element<'_, Message> {
+        container(
+            Row::from_vec(
+                self.windows
+                    .iter()
+                    .map(|window| {
+                        window
+                            .view_header()
+                            .map(Message::EditorConfigMessage)
+                            .into()
+                    })
+                    .collect(),
+            )
+            .spacing(1),
+        )
+        .width(Length::Fill)
+        .style(|theme: &iced::Theme| {
+            let palette = theme.palette();
+            container::Style {
+                background: Some(palette.background.weakest.color.into()),
+                border: iced::Border::default().width(0),
+                ..Default::default()
+            }
+        })
+        .into()
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
@@ -81,6 +109,7 @@ impl Editor {
                 }
                 Task::none()
             }
+            Message::EditorConfigMessage(msg) => Task::none(), // TODO update me
         }
     }
 }
