@@ -122,6 +122,17 @@ impl Editor {
             Message::EditorConfigMessage(editor_config, msg) => match msg {
                 editor_config::Message::Select => Task::done(Message::Focus(editor_config)),
                 editor_config::Message::Close => Task::done(Message::Close(editor_config)),
+                _ => {
+                    if let Some(idx) = self.windows.iter().position(|win| {
+                        win.connection_string() == editor_config.connection_string()
+                    }) {
+                        self.windows[idx].update(msg).map(move |msg| {
+                            Message::EditorConfigMessage(editor_config.clone(), msg)
+                        })
+                    } else {
+                        Task::none()
+                    }
+                }
             },
         }
     }
