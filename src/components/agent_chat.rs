@@ -173,9 +173,7 @@ impl AgentChat {
             })
         ])
         .style(|_theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                _theme.palette().background.weak.color,
-            )),
+            background: Some(Background::Color(_theme.palette().background.weak.color)),
             ..Default::default()
         })
         .into()
@@ -213,7 +211,9 @@ impl AgentChat {
 
     pub fn view(&self) -> Element<'_, AgentChatMessage> {
         let layout = column![
-            container(text("AI Chat").size(14)).padding([4.0, 8.0]),
+            container(text("AI Chat").size(14))
+                .height(30)
+                .padding([4.0, 8.0]),
             rule::horizontal(1.0),
             self.messages_view(),
             self.error_view(),

@@ -76,13 +76,14 @@ pub struct App {
     pub agent_menu_open: bool,
     pub pending_save: bool,
     panes: pane_grid::State<PaneKind>,
+    main_pane: pane_grid::Pane,
     agent_chat_pane: Option<pane_grid::Pane>,
     editor: Editor,
 }
 
 impl Default for App {
     fn default() -> Self {
-        let (pane, _main_pane) = pane_grid::State::new(PaneKind::Main);
+        let (pane, main_pane) = pane_grid::State::new(PaneKind::Main);
         Self {
             connection_manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
@@ -96,6 +97,7 @@ impl Default for App {
             agent_menu_open: false,
             pending_save: false,
             panes: pane,
+            main_pane,
             agent_chat_pane: None,
             editor: Editor::default(),
         }
@@ -283,18 +285,11 @@ impl App {
                 let chat = AgentChat::new(provider, configs, pools);
                 self.agent_chat = Some(chat);
                 self.agent_menu_open = false;
-                let main_pane = self
-                    .panes
-                    .iter()
-                    .find(|(_, state)| matches!(state, PaneKind::Main))
-                    .map(|(pane, _)| *pane);
-                if let Some(main_pane) = main_pane {
-                    if let Some((agent_pane, _split)) =
-                        self.panes
-                            .split(pane_grid::Axis::Vertical, main_pane, PaneKind::AgentChat)
-                    {
-                        self.agent_chat_pane = Some(agent_pane);
-                    }
+                if let Some((agent_pane, _split)) =
+                    self.panes
+                        .split(pane_grid::Axis::Vertical, self.main_pane, PaneKind::AgentChat)
+                {
+                    self.agent_chat_pane = Some(agent_pane);
                 }
                 Task::none()
             }

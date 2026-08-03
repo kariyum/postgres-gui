@@ -1,7 +1,7 @@
 use anyhow::Context;
 use iced::{
     Element, Length, Task,
-    widget::{Row, column, container, space},
+    widget::{self, Row, column, container, scrollable, space},
 };
 
 use crate::components::editor_config::{self, EditorConfig};
@@ -57,14 +57,12 @@ impl Editor {
         match window {
             Ok(window) => column![
                 self.view_header(),
-                container(
-                    window
-                        .view_editor()
-                        .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
+                window
+                    .view()
+                    .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
             ]
+            .spacing(0)
+            .padding(0)
             .into(),
 
             Err(err) => {
@@ -76,20 +74,26 @@ impl Editor {
 
     fn view_header(&self) -> Element<'_, Message> {
         container(
-            Row::from_vec(
-                self.windows
-                    .iter()
-                    .map(|window| {
-                        window
-                            .view_header()
-                            .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
-                            .into()
-                    })
-                    .collect(),
+            scrollable(
+                Row::from_vec(
+                    self.windows
+                        .iter()
+                        .map(|window| {
+                            window
+                                .view_header()
+                                .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
+                                .into()
+                        })
+                        .collect(),
+                )
+                .spacing(1),
             )
-            .spacing(1),
+            .direction(widget::scrollable::Direction::Horizontal(
+                widget::scrollable::Scrollbar::default(),
+            )),
         )
         .width(Length::Fill)
+        .height(30)
         .style(|theme: &iced::Theme| {
             let palette = theme.palette();
             container::Style {

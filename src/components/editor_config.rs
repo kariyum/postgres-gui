@@ -1,7 +1,9 @@
 use crate::core::connection_config::ConnectionConfig;
 use iced::{
-    Background, Color, Element, Length, Task, Theme, alignment, theme,
-    widget::{button, column, container, row, svg, text, text_editor},
+    Background, Color, Element, Length, Task, Theme,
+    alignment::{self, Horizontal::Left},
+    theme,
+    widget::{Column, button, column, container, pane_grid, row, rule, svg, text, text_editor},
 };
 
 #[derive(Debug, Clone)]
@@ -9,6 +11,9 @@ pub struct EditorConfig {
     config: ConnectionConfig,
     database: String,
     editor: text_editor::Content,
+    panes: pane_grid::State<PaneKind>,
+    editor_pane: pane_grid::Pane,
+    table_pane: Option<pane_grid::Pane>,
     // database_keeper:
     // query result
     // query filters
@@ -16,18 +21,35 @@ pub struct EditorConfig {
 }
 
 #[derive(Debug, Clone)]
+enum PaneKind {
+    Editor,
+    Table,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     Select,
     Close,
     EditorAction(text_editor::Action),
+    ToolbarActions(ToolbarActions),
+    Resized(pane_grid::ResizeEvent),
+}
+
+#[derive(Debug, Clone)]
+enum ToolbarActions {
+    RunQuery,
 }
 
 impl EditorConfig {
     pub fn new(connection_config: ConnectionConfig) -> Self {
+        let (pane, editor_pane) = pane_grid::State::new(PaneKind::Editor);
         Self {
             database: connection_config.database.clone(),
             config: connection_config,
             editor: text_editor::Content::new(),
+            panes: pane,
+            editor_pane,
+            table_pane: None,
         }
     }
 
@@ -37,6 +59,31 @@ impl EditorConfig {
             Message::Close => Task::none(),
             Message::EditorAction(action) => {
                 self.editor.perform(action);
+                Task::none()
+            }
+            Message::ToolbarActions(toolbar_actions) => {
+                tracing::info!("Got toolbar action {:?}", toolbar_actions);
+                self.perform_toolbar_action(toolbar_actions)
+            }
+            Message::Resized(resize_event) => {
+                self.panes.resize(resize_event.split, resize_event.ratio);
+                Task::none()
+            }
+        }
+    }
+
+    fn perform_toolbar_action(&mut self, msg: ToolbarActions) -> Task<Message> {
+        match msg {
+            ToolbarActions::RunQuery => {
+                if self.table_pane.is_none() {
+                    if let Some((pane, _split)) = self.panes.split(
+                        pane_grid::Axis::Horizontal,
+                        self.editor_pane,
+                        PaneKind::Table,
+                    ) {
+                        self.table_pane = Some(pane);
+                    }
+                }
                 Task::none()
             }
         }
@@ -76,6 +123,7 @@ impl EditorConfig {
         )
         .on_press(Message::Select)
         .padding([4, 6])
+        .height(Length::Fill)
         .style(|_theme, _status| button::Style {
             border: iced::Border::default().width(0),
             ..button::background(_theme, _status)
@@ -83,11 +131,27 @@ impl EditorConfig {
         .into()
     }
 
-    pub fn view_editor(&self) -> Element<'_, Message> {
-        container(column![self.view_toolbar(), self.view_query_editor()])
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+    pub fn view(&self) -> Element<'_, Message> {
+        pane_grid::PaneGrid::new(&self.panes, |_pane, state, _is_maximized| match state {
+            PaneKind::Editor => pane_grid::Content::new(self.view_editor()),
+            PaneKind::Table => pane_grid::Content::new(self.view_table()),
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0)
+        .on_resize(5, |event| Message::Resized(event))
+        .into()
+    }
+
+    fn view_editor(&self) -> Element<'_, Message> {
+        container(column![
+            self.view_toolbar(),
+            rule::horizontal(1),
+            self.view_query_editor()
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     fn view_toolbar(&self) -> Element<'_, Message> {
@@ -97,7 +161,9 @@ impl EditorConfig {
             )))
             .height(12)
             .width(12),
-        );
+        )
+        .on_press(Message::ToolbarActions(ToolbarActions::RunQuery));
+
         container(
             row![
                 run_btn,
@@ -108,7 +174,7 @@ impl EditorConfig {
             ]
             .align_y(iced::Alignment::Center),
         )
-        .padding([6, 12])
+        .padding([6, 4])
         .into()
     }
 
@@ -144,5 +210,12 @@ impl EditorConfig {
             }
         })
         .into()
+    }
+
+    fn view_table(&self) -> Element<'_, Message> {
+        container(column![rule::horizontal(1), container(text("I'm a table")),])
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .into()
     }
 }
