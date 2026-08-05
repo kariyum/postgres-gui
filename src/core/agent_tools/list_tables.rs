@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 
-use super::{DbRequest, ToolError, get_pool};
+use super::{DatabaseKeeperMessage, ToolError, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListTablesArgs {
@@ -13,11 +13,11 @@ pub struct ListTablesArgs {
 }
 
 pub struct ListTables {
-    db_actor: Sender<DbRequest>,
+    db_actor: Sender<DatabaseKeeperMessage>,
 }
 
 impl ListTables {
-    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+    pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 
-use super::{DbRequest, ToolError};
+use super::{DatabaseKeeperMessage, ToolError};
 use crate::core::database_keeper::connect_database;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,11 +13,11 @@ pub struct ConnectToDatabaseArgs {
 }
 
 pub struct ConnectToDatabase {
-    db_actor: Sender<DbRequest>,
+    db_actor: Sender<DatabaseKeeperMessage>,
 }
 
 impl ConnectToDatabase {
-    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+    pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }

@@ -27,7 +27,7 @@ pub use list_schemas::ListSchemas;
 pub use list_tables::ListTables;
 pub use show_table_stats::ShowTableStats;
 
-pub use crate::core::database_keeper::{DbRequest, get_connections, get_pool};
+pub use crate::core::database_keeper::{DatabaseKeeperMessage, get_connections, get_pool};
 
 #[derive(Debug, Clone)]
 pub struct ToolError(pub String);
@@ -112,7 +112,7 @@ pub fn cell_to_value(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -
 #[derive(Clone)]
 pub struct Tools {
     toolset: std::sync::Arc<ToolSet>,
-    sender: Sender<DbRequest>,
+    sender: Sender<DatabaseKeeperMessage>,
 }
 
 impl std::fmt::Debug for Tools {
@@ -122,7 +122,7 @@ impl std::fmt::Debug for Tools {
 }
 
 impl Tools {
-    pub fn new(sender: Sender<DbRequest>) -> Self {
+    pub fn new(sender: Sender<DatabaseKeeperMessage>) -> Self {
         let mut toolset = ToolSet::default();
         toolset.add_tool(ExecuteSql::new(sender.clone()));
         toolset.add_tool(ListSchemas::new(sender.clone()));
@@ -136,20 +136,6 @@ impl Tools {
         Self {
             toolset: std::sync::Arc::new(toolset),
             sender,
-        }
-    }
-
-    pub fn update_connections(
-        &self,
-        configs: Vec<crate::core::connection_config::ConnectionConfig>,
-        pools: HashMap<String, PgPool>,
-    ) {
-        info!("Sending connections update to DatabaseKeeper actor!");
-        if let Err(err) = self
-            .sender
-            .try_send(DbRequest::UpdateConnections { configs, pools })
-        {
-            error!("Failed to send UpdateConnections message to DatabaseKeeper: {err}");
         }
     }
 

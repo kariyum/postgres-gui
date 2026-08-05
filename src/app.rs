@@ -8,6 +8,7 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
+use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
@@ -18,16 +19,17 @@ use crate::components::editor_config::EditorConfig;
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
+use crate::core::agent_tools::DatabaseKeeperMessage;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::connection_config::{self, ConnectionConfig};
+use crate::core::database_keeper::DatabaseKeeper;
 use iced_aw::drop_down;
 
 use crate::theme;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    ConnManager(ConnManagerMessage),
     Close,
     Drag,
     DragResize(window::Direction),
@@ -54,6 +56,7 @@ pub enum Message {
     AgentProviderSelected(ConfiguredProvider),
     ConnectionConfig(connection_config::Message),
     Editor(editor::Message),
+    DialogMessage(DialogMessage),
 }
 
 #[derive(Debug)]
@@ -79,11 +82,15 @@ pub struct App {
     main_pane: pane_grid::Pane,
     agent_chat_pane: Option<pane_grid::Pane>,
     editor: Editor,
+    database_keeper_actor_tx: Sender<DatabaseKeeperMessage>,
 }
 
 impl Default for App {
     fn default() -> Self {
         let (pane, main_pane) = pane_grid::State::new(PaneKind::Main);
+        let (tx, rx) = tokio::sync::mpsc::channel(1000);
+        let mut actor = DatabaseKeeper::new(rx);
+        tokio::spawn(async move { actor.run().await });
         Self {
             connection_manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
@@ -100,6 +107,7 @@ impl Default for App {
             main_pane,
             agent_chat_pane: None,
             editor: Editor::default(),
+            database_keeper_actor_tx: tx,
         }
     }
 }
@@ -108,39 +116,32 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Editor(msg) => self.editor.update(msg).map(Message::Editor),
-            Message::AddConnection => {
-                Task::done(Message::CloseMenu).chain(Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionDialogMessage(DialogMessage::OpenNew),
-                )))
-            }
-            Message::ConnManager(msg) => {
-                use crate::connection_manager::Action;
-                match self.connection_manager.update(msg) {
-                    Action::None => {
-                        self.sync_connections();
-                        Task::none()
-                    }
-                    Action::Run(task) => {
-                        self.sync_connections();
-                        task.map(Message::ConnManager)
-                    }
-                    Action::Dialog(msg) => self.dialog.update(msg).map(|m| {
-                        Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(m))
-                    }),
-                }
-            }
+            Message::AddConnection => Task::done(Message::CloseMenu)
+                .chain(Task::done(Message::DialogMessage(DialogMessage::OpenNew))),
             Message::ConfigLoaded(config) => {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
                 info!("Loaded config {:?}", config);
-                self.sync_connections();
                 Task::batch([
-                    Task::done(Message::ConnManager(ConnManagerMessage::ConnectionsLoaded(
-                        config.connections,
-                    ))),
                     Task::done(Message::Settings(SettingsMessage::AgentConfig(
                         config.agent_config,
                     ))),
+                    Task::perform(
+                        async move {
+                            self.database_keeper_actor_tx
+                                .send(DatabaseKeeperMessage::LoadedConfig {
+                                    configs: config.connections,
+                                })
+                                .await
+                                .context("DatabaseKeeperActor failed on LoadedConfig message")
+                        },
+                        |result| {
+                            if let Err(err) = result {
+                                error!("{err}")
+                            }
+                            Message::Noop
+                        },
+                    ),
                 ])
             }
             Message::SavePending => {
@@ -269,26 +270,16 @@ impl App {
                     }
                 };
 
-                let configs: Vec<ConnectionConfig> = self
-                    .connection_manager
-                    .items
-                    .iter()
-                    .map(|connection_item| connection_item.cfg.clone())
-                    .collect();
-
-                let pools: std::collections::HashMap<String, sqlx::PgPool> = self
-                    .connection_manager
-                    .items
-                    .iter()
-                    .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
-                    .collect();
-                let chat = AgentChat::new(provider, configs, pools);
-                self.agent_chat = Some(chat);
+                self.agent_chat = Some(AgentChat::new(
+                    provider,
+                    self.database_keeper_actor_tx.clone(),
+                ));
                 self.agent_menu_open = false;
-                if let Some((agent_pane, _split)) =
-                    self.panes
-                        .split(pane_grid::Axis::Vertical, self.main_pane, PaneKind::AgentChat)
-                {
+                if let Some((agent_pane, _split)) = self.panes.split(
+                    pane_grid::Axis::Vertical,
+                    self.main_pane,
+                    PaneKind::AgentChat,
+                ) {
                     self.agent_chat_pane = Some(agent_pane);
                 }
                 Task::none()
@@ -695,28 +686,6 @@ impl App {
                 ..Default::default()
             })
             .into()
-    }
-
-    fn sync_connections(&self) {
-        info!("Sync connections...");
-        let configs: Vec<ConnectionConfig> = self
-            .connection_manager
-            .items
-            .iter()
-            .map(|connection_item| connection_item.cfg.clone())
-            .collect();
-
-        let pools: std::collections::HashMap<String, sqlx::PgPool> = self
-            .connection_manager
-            .items
-            .iter()
-            .filter_map(|i| Some((i.cfg.name.clone(), i.pool.clone()?)))
-            .collect();
-
-        info!("agent_chat is defined: {}", self.agent_chat.is_some());
-        if let Some(ref agent_chat) = self.agent_chat {
-            agent_chat.update_connections(configs, pools);
-        }
     }
 }
 

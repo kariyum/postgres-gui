@@ -1,6 +1,7 @@
 use iced::futures::Stream;
 use std::collections::HashMap;
 use std::{format, matches};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::error;
 use tracing::info;
 use uuid::Uuid;
@@ -16,7 +17,7 @@ use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Role};
 use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
-use crate::core::agent_tools::{Tools, needs_approval};
+use crate::core::agent_tools::{DatabaseKeeperMessage, Tools, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
 use crate::core::connection_config::ConnectionConfig;
 use crate::core::database_keeper::DatabaseKeeper;
@@ -58,15 +59,8 @@ pub struct AgentChat {
 }
 
 impl AgentChat {
-    pub fn new(
-        config: ConfiguredProvider,
-        configs: Vec<ConnectionConfig>,
-        pools: HashMap<String, sqlx::PgPool>,
-    ) -> Self {
+    pub fn new(config: ConfiguredProvider, tx: Sender<DatabaseKeeperMessage>) -> Self {
         let chosen_model = config.default_model.clone();
-        let (tx, rx) = tokio::sync::mpsc::channel(1000);
-        let mut actor = DatabaseKeeper::new(configs, pools, rx);
-        tokio::spawn(async move { actor.run().await });
         Self {
             visible: false,
             input: text_editor::Content::default(),
@@ -540,14 +534,6 @@ impl AgentChat {
 
     pub fn streaming(&self) -> bool {
         self.stream_id.is_some()
-    }
-
-    pub fn update_connections(
-        &self,
-        configs: Vec<ConnectionConfig>,
-        pools: std::collections::HashMap<String, sqlx::PgPool>,
-    ) {
-        self.tool_manager.update_connections(configs, pools);
     }
 
     fn all_tool_calls_complete(&self) -> bool {

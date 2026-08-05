@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use sqlx::{Column, Row, TypeInfo};
 use tokio::sync::mpsc::Sender;
 
-use super::{DbRequest, ToolError, cell_to_value, get_pool};
+use super::{DatabaseKeeperMessage, ToolError, cell_to_value, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteSqlArgs {
@@ -14,11 +14,11 @@ pub struct ExecuteSqlArgs {
 }
 
 pub struct ExecuteSql {
-    db_actor: Sender<DbRequest>,
+    db_actor: Sender<DatabaseKeeperMessage>,
 }
 
 impl ExecuteSql {
-    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+    pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }

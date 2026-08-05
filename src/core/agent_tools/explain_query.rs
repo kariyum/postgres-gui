@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use tokio::sync::mpsc::Sender;
 
-use super::{DbRequest, ToolError, get_pool};
+use super::{DatabaseKeeperMessage, ToolError, get_pool};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExplainQueryArgs {
@@ -14,11 +14,11 @@ pub struct ExplainQueryArgs {
 }
 
 pub struct ExplainQuery {
-    db_actor: Sender<DbRequest>,
+    db_actor: Sender<DatabaseKeeperMessage>,
 }
 
 impl ExplainQuery {
-    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+    pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }

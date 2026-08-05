@@ -25,7 +25,7 @@ impl From<&ConnectionConfig> for SavedConnection {
     }
 }
 
-pub enum DbRequest {
+pub enum DatabaseKeeperMessage {
     GetPool {
         database_name: String,
         respond: oneshot::Sender<Result<PgPool, ToolError>>,
@@ -33,31 +33,32 @@ pub enum DbRequest {
     GetConnections {
         respond: oneshot::Sender<Vec<SavedConnection>>,
     },
-    UpdateConnections {
-        configs: Vec<ConnectionConfig>,
-        pools: HashMap<String, PgPool>,
-    },
     ConnectDatabase {
         database_name: String,
         respond: oneshot::Sender<Result<String, ToolError>>,
     },
+    LoadedConfig {
+        configs: Vec<ConnectionConfig>,
+    },
+    ConnectionAction(ConnectionAction),
+}
+
+enum ConnectionAction {
+    Delete { config: ConnectionConfig },
+    Add { config: ConnectionConfig },
 }
 
 pub struct DatabaseKeeper {
     configs: Vec<ConnectionConfig>,
     pools: HashMap<String, PgPool>,
-    receiver: mpsc::Receiver<DbRequest>,
+    receiver: mpsc::Receiver<DatabaseKeeperMessage>,
 }
 
 impl DatabaseKeeper {
-    pub fn new(
-        configs: Vec<ConnectionConfig>,
-        pools: HashMap<String, PgPool>,
-        receiver: mpsc::Receiver<DbRequest>,
-    ) -> Self {
+    pub fn new(receiver: mpsc::Receiver<DatabaseKeeperMessage>) -> Self {
         Self {
-            configs,
-            pools,
+            configs: vec![],
+            pools: HashMap::new(),
             receiver,
         }
     }
@@ -65,7 +66,7 @@ impl DatabaseKeeper {
     pub async fn run(&mut self) {
         while let Some(req) = self.receiver.recv().await {
             match req {
-                DbRequest::GetPool {
+                DatabaseKeeperMessage::GetPool {
                     database_name,
                     respond,
                 } => {
@@ -83,21 +84,12 @@ impl DatabaseKeeper {
                     });
                     let _ = respond.send(result);
                 }
-                DbRequest::GetConnections { respond } => {
+                DatabaseKeeperMessage::GetConnections { respond } => {
                     let saved: Vec<SavedConnection> =
                         self.configs.iter().map(SavedConnection::from).collect();
                     let _ = respond.send(saved);
                 }
-                DbRequest::UpdateConnections { configs, pools } => {
-                    info!(
-                        "UpdateConnections: {} config(s), {} pool(s)",
-                        configs.len(),
-                        pools.len()
-                    );
-                    self.configs = configs;
-                    self.pools = pools;
-                }
-                DbRequest::ConnectDatabase {
+                DatabaseKeeperMessage::ConnectDatabase {
                     database_name,
                     respond,
                 } => {
@@ -108,6 +100,11 @@ impl DatabaseKeeper {
                     }
                     let _ = respond.send(result);
                 }
+                DatabaseKeeperMessage::LoadedConfig { configs } => {
+                    info!("UpdateConnections: {} config(s)", configs.len(),);
+                    self.configs = configs;
+                }
+                DatabaseKeeperMessage::ConnectionAction(connection_action) => todo!(),
             }
         }
     }
@@ -141,12 +138,12 @@ impl DatabaseKeeper {
 }
 
 pub async fn get_pool(
-    actor: &mpsc::Sender<DbRequest>,
+    actor: &mpsc::Sender<DatabaseKeeperMessage>,
     database_name: &str,
 ) -> Result<PgPool, ToolError> {
     let (tx, rx) = oneshot::channel();
     actor
-        .send(DbRequest::GetPool {
+        .send(DatabaseKeeperMessage::GetPool {
             database_name: database_name.to_string(),
             respond: tx,
         })
@@ -157,11 +154,11 @@ pub async fn get_pool(
 }
 
 pub async fn get_connections(
-    actor: &mpsc::Sender<DbRequest>,
+    actor: &mpsc::Sender<DatabaseKeeperMessage>,
 ) -> Result<Vec<SavedConnection>, ToolError> {
     let (tx, rx) = oneshot::channel();
     actor
-        .send(DbRequest::GetConnections { respond: tx })
+        .send(DatabaseKeeperMessage::GetConnections { respond: tx })
         .await
         .map_err(|_| ToolError("Database actor is not running".into()))?;
     rx.await
@@ -169,12 +166,12 @@ pub async fn get_connections(
 }
 
 pub async fn connect_database(
-    actor: &mpsc::Sender<DbRequest>,
+    actor: &mpsc::Sender<DatabaseKeeperMessage>,
     database_name: &str,
 ) -> Result<String, ToolError> {
     let (tx, rx) = oneshot::channel();
     actor
-        .send(DbRequest::ConnectDatabase {
+        .send(DatabaseKeeperMessage::ConnectDatabase {
             database_name: database_name.to_string(),
             respond: tx,
         })

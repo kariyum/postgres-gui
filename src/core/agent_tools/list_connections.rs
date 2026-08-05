@@ -4,17 +4,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 
-use super::{DbRequest, ToolError, get_connections};
+use super::{DatabaseKeeperMessage, ToolError, get_connections};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListConnectionsArgs {}
 
 pub struct ListConnections {
-    db_actor: Sender<DbRequest>,
+    db_actor: Sender<DatabaseKeeperMessage>,
 }
 
 impl ListConnections {
-    pub fn new(db_actor: Sender<DbRequest>) -> Self {
+    pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
