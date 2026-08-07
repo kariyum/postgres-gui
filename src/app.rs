@@ -83,6 +83,7 @@ pub struct App {
     agent_chat_pane: Option<pane_grid::Pane>,
     editor: Editor,
     database_keeper_actor_tx: Sender<DatabaseKeeperMessage>,
+    app_config: Option<AppConfig>,
 }
 
 impl Default for App {
@@ -108,6 +109,7 @@ impl Default for App {
             agent_chat_pane: None,
             editor: Editor::default(),
             database_keeper_actor_tx: tx,
+            app_config: None,
         }
     }
 }
@@ -119,6 +121,7 @@ impl App {
             Message::AddConnection => Task::done(Message::CloseMenu)
                 .chain(Task::done(Message::DialogMessage(DialogMessage::OpenNew))),
             Message::ConfigLoaded(config) => {
+                self.app_config = Some(config.clone());
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
                 info!("Loaded config {:?}", config);
@@ -445,7 +448,11 @@ impl App {
     }
 
     fn view_configs(&self) -> Element<'_, Message> {
-        if self.connection_manager.items.is_empty() {
+        let connections = self
+            .app_config
+            .as_ref()
+            .map(|config| &config.connections);
+        if connections.is_none_or(|list| list.is_empty()) {
             button("Add Connection")
                 .on_press(Message::AddConnection)
                 .padding([8, 12])
@@ -454,10 +461,9 @@ impl App {
         } else {
             scrollable(
                 Column::from_vec(
-                    self.connection_manager
-                        .items
+                    connections.unwrap()
                         .iter()
-                        .map(|item| item.cfg.view().map(Message::ConnectionConfig).into())
+                        .map(|item| item.view().map(Message::ConnectionConfig).into())
                         .collect(),
                 )
                 .spacing(12),
