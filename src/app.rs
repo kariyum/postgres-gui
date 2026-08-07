@@ -122,18 +122,18 @@ impl App {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
                 info!("Loaded config {:?}", config);
+                let tx = self.database_keeper_actor_tx.clone();
                 Task::batch([
                     Task::done(Message::Settings(SettingsMessage::AgentConfig(
                         config.agent_config,
                     ))),
                     Task::perform(
                         async move {
-                            self.database_keeper_actor_tx
-                                .send(DatabaseKeeperMessage::LoadedConfig {
-                                    configs: config.connections,
-                                })
-                                .await
-                                .context("DatabaseKeeperActor failed on LoadedConfig message")
+                            tx.send(DatabaseKeeperMessage::LoadedConfig {
+                                configs: config.connections,
+                            })
+                            .await
+                            .context("DatabaseKeeperActor failed on LoadedConfig message")
                         },
                         |result| {
                             if let Err(err) = result {
@@ -291,19 +291,11 @@ impl App {
                         cfg,
                     ))))
                 }
-                connection_config::Message::Edit(cfg) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(cfg.id, ItemMessage::EditRequested),
-                )),
-                connection_config::Message::Duplicate(cfg) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(
-                        cfg.id,
-                        ItemMessage::DuplicateRequested,
-                    ),
-                )),
-                connection_config::Message::Delete(cfg) => Task::done(Message::ConnManager(
-                    ConnManagerMessage::ConnectionItemMessage(cfg.id, ItemMessage::DeleteRequested),
-                )),
+                connection_config::Message::Edit(cfg) => Task::none(),
+                connection_config::Message::Duplicate(cfg) => Task::none(),
+                connection_config::Message::Delete(cfg) => Task::none(),
             },
+            Message::DialogMessage(dialog_message) => todo!(),
         }
     }
 
@@ -440,19 +432,15 @@ impl App {
 
     fn view_connection_manager_dialog(&self) -> Option<container::Container<'_, Message>> {
         self.dialog.view().map(|dialog| {
-            container(
-                dialog.map(|msg| {
-                    Message::ConnManager(ConnManagerMessage::ConnectionDialogMessage(msg))
-                }),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center)
-            .style(|_: &Theme| iced::widget::container::Style {
-                background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                ..Default::default()
-            })
+            container(dialog.map(|msg| Message::DialogMessage(msg)))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .style(|_: &Theme| iced::widget::container::Style {
+                    background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                    ..Default::default()
+                })
         })
     }
 
