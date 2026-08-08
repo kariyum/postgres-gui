@@ -1,7 +1,7 @@
 use iced::futures::Stream;
 use std::collections::HashMap;
 use std::{format, matches};
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 use tracing::error;
 use tracing::info;
 use uuid::Uuid;

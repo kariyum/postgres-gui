@@ -2,7 +2,7 @@ use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError};
 use crate::core::database_keeper::connect_database;
@@ -51,6 +51,6 @@ impl Tool for ConnectToDatabase {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        connect_database(&self.db_actor, &args.database_name).await
+        connect_database(&mut self.db_actor.clone(), &args.database_name).await
     }
 }

@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
+use iced::futures::channel::mpsc;
+use iced::futures::{SinkExt, StreamExt};
 use sqlx::PgPool;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tracing::{info, warn};
 
 use crate::components::connection_config::ConnectionConfig;
 use crate::core::agent_tools::ToolError;
-use crate::db;
+use crate::{app, db};
 
 #[derive(Debug, Clone)]
 pub struct SavedConnection {
@@ -53,13 +55,13 @@ pub struct DatabaseKeeper {
     configs: Vec<ConnectionConfig>,
     pools: HashMap<String, PgPool>,
     receiver: mpsc::Receiver<DatabaseKeeperMessage>,
-    ui_sender: iced::futures::channel::mpsc::Sender<crate::app::Message>,
+    ui_sender: mpsc::Sender<app::Message>,
 }
 
 impl DatabaseKeeper {
     pub fn new(
         receiver: mpsc::Receiver<DatabaseKeeperMessage>,
-        ui_sender: iced::futures::channel::mpsc::Sender<crate::app::Message>,
+        ui_sender: mpsc::Sender<app::Message>,
     ) -> Self {
         Self {
             configs: vec![],
@@ -70,7 +72,7 @@ impl DatabaseKeeper {
     }
 
     pub async fn run(&mut self) {
-        while let Some(req) = self.receiver.recv().await {
+        while let Some(req) = self.receiver.next().await {
             match req {
                 DatabaseKeeperMessage::GetPool {
                     database_name,
@@ -164,7 +166,7 @@ impl DatabaseKeeper {
 }
 
 pub async fn get_pool(
-    actor: &mpsc::Sender<DatabaseKeeperMessage>,
+    actor: &mut mpsc::Sender<DatabaseKeeperMessage>,
     database_name: &str,
 ) -> Result<PgPool, ToolError> {
     let (tx, rx) = oneshot::channel();
@@ -180,7 +182,7 @@ pub async fn get_pool(
 }
 
 pub async fn get_connections(
-    actor: &mpsc::Sender<DatabaseKeeperMessage>,
+    actor: &mut mpsc::Sender<DatabaseKeeperMessage>,
 ) -> Result<Vec<SavedConnection>, ToolError> {
     let (tx, rx) = oneshot::channel();
     actor
@@ -192,7 +194,7 @@ pub async fn get_connections(
 }
 
 pub async fn connect_database(
-    actor: &mpsc::Sender<DatabaseKeeperMessage>,
+    actor: &mut mpsc::Sender<DatabaseKeeperMessage>,
     database_name: &str,
 ) -> Result<String, ToolError> {
     let (tx, rx) = oneshot::channel();

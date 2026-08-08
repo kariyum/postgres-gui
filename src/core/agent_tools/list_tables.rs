@@ -2,7 +2,7 @@ use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError, get_pool};
 
@@ -54,7 +54,7 @@ impl Tool for ListTables {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let pool = get_pool(&self.db_actor, &args.database_name).await?;
+        let pool = get_pool(&mut self.db_actor.clone(), &args.database_name).await?;
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT table_name FROM information_schema.tables \
              WHERE table_schema = $1 AND table_type = 'BASE TABLE' \

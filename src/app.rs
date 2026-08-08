@@ -8,7 +8,8 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
-use tokio::sync::mpsc::Sender;
+use iced::futures::SinkExt;
+use iced::futures::channel::mpsc::Sender;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -314,7 +315,7 @@ impl App {
                     let config = self.app_config.clone();
                     let tx_opt = self.database_keeper_actor_tx.clone();
                     Task::batch([
-                        if let Some(tx) = tx_opt {
+                        if let Some(mut tx) = tx_opt {
                             Task::perform(
                                 async move {
                                     tx.send(DatabaseKeeperMessage::ConnectionAction(
@@ -363,12 +364,12 @@ impl App {
                     }
                     let tx_opt = self.database_keeper_actor_tx.clone();
                     Task::batch([
-                        if let Some(tx) = tx_opt {
-                            Task::perform(
-                                async move {
-                                    tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                        database_keeper::ConnectionAction::Delete { config },
-                                    ))
+                    if let Some(mut tx) = tx_opt {
+                        Task::perform(
+                            async move {
+                                tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                    database_keeper::ConnectionAction::Delete { config },
+                                ))
                                     .await
                                     .context("send config to database keeper")
                                 },
@@ -399,13 +400,13 @@ impl App {
                     self.app_config.connections.push(config.clone());
                 };
                 let tx_opt = self.database_keeper_actor_tx.clone();
-                Task::batch([
-                    if let Some(tx) = tx_opt {
-                        Task::perform(
-                            async move {
-                                tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                    database_keeper::ConnectionAction::Add { config },
-                                ))
+                    Task::batch([
+                        if let Some(mut tx) = tx_opt {
+                            Task::perform(
+                                async move {
+                                    tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                        database_keeper::ConnectionAction::Add { config },
+                                    ))
                                 .await
                                 .context("send config to database keeper")
                             },
@@ -453,7 +454,7 @@ impl App {
 
     fn send_loaded_config(
         &self,
-        tx: Sender<DatabaseKeeperMessage>,
+        mut tx: Sender<DatabaseKeeperMessage>,
         configs: Vec<crate::components::connection_config::ConnectionConfig>,
     ) -> Task<Message> {
         Task::perform(
@@ -489,7 +490,7 @@ impl App {
             iced::stream::channel(
                 1000,
                 |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
-                    let (tx, rx) = tokio::sync::mpsc::channel(1000);
+                    let (tx, rx) = iced::futures::channel::mpsc::channel(1000);
                     let _ = output.try_send(Message::DatabaseKeeperReady(tx));
                     let mut actor = DatabaseKeeper::new(rx, output);
                     actor.run().await;

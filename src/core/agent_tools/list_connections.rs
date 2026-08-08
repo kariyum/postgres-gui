@@ -2,7 +2,7 @@ use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError, get_connections};
 
@@ -42,7 +42,7 @@ impl Tool for ListConnections {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let connections = get_connections(&self.db_actor).await?;
+        let connections = get_connections(&mut self.db_actor.clone()).await?;
 
         let items: Vec<serde_json::Value> = connections
             .iter()

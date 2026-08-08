@@ -3,7 +3,7 @@ use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError, get_pool};
 
@@ -62,7 +62,7 @@ impl Tool for ShowTableStats {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let pool = get_pool(&self.db_actor, &args.database_name).await?;
+        let pool = get_pool(&mut self.db_actor.clone(), &args.database_name).await?;
 
         let row = sqlx::query(
             "SELECT \

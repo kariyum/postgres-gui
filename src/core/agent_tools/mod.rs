@@ -11,7 +11,7 @@ use std::fmt;
 
 use serde_json::Value;
 use sqlx::Row;
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 use tracing::info;
 
 use rig_core::completion::ToolDefinition;

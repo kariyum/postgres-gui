@@ -3,7 +3,7 @@ use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Column, Row, TypeInfo};
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError, cell_to_value, get_pool};
 
@@ -58,7 +58,7 @@ impl Tool for ExecuteSql {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let pool = get_pool(&self.db_actor, &args.database_name).await?;
+        let pool = get_pool(&mut self.db_actor.clone(), &args.database_name).await?;
         let trimmed = args.sql.trim().to_uppercase();
         let is_select = trimmed.starts_with("SELECT")
             || trimmed.starts_with("WITH")

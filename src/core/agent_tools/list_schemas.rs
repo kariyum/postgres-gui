@@ -2,7 +2,7 @@ use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::mpsc::Sender;
+use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError, get_pool};
 
@@ -49,7 +49,7 @@ impl Tool for ListSchemas {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let pool = get_pool(&self.db_actor, &args.database_name).await?;
+        let pool = get_pool(&mut self.db_actor.clone(), &args.database_name).await?;
         let schemas: Vec<String> = sqlx::query_scalar(
             "SELECT schema_name FROM information_schema.schemata \
              WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
