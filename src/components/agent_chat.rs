@@ -1,7 +1,7 @@
 use iced::futures::Stream;
 use std::collections::HashMap;
 use std::{format, matches};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tracing::error;
 use tracing::info;
 use uuid::Uuid;
@@ -19,8 +19,6 @@ use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{DatabaseKeeperMessage, Tools, needs_approval};
 use crate::core::configured_provider::ConfiguredProvider;
-use crate::core::connection_config::ConnectionConfig;
-use crate::core::database_keeper::DatabaseKeeper;
 
 #[derive(Clone, Debug)]
 pub enum AgentChatMessage {

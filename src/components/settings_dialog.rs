@@ -4,7 +4,6 @@ use tracing::info;
 
 use crate::components::provider_config::{ProviderConfig, ProviderConfigMessage};
 use crate::core::agent_config::AgentConfig;
-use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::ui::input_field::InputField;
 
 #[derive(Debug, Clone)]

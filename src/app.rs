@@ -10,19 +10,18 @@ use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
+use uuid::Uuid;
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
+use crate::components::connection_config;
 use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage};
-use crate::components::connection_item::ItemMessage;
 use crate::components::editor::{self, Editor};
 use crate::components::editor_config::EditorConfig;
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
-use crate::connection_manager::{ConnManagerMessage, ConnectionManager};
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::DatabaseKeeperMessage;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
-use crate::core::connection_config::{self, ConnectionConfig};
 use crate::core::database_keeper::{self, DatabaseKeeper};
 use iced_aw::drop_down;
 
@@ -40,7 +39,6 @@ pub enum Message {
     RestorePosition,
     ZoomIn,
     ZoomOut,
-    ZoomReset,
     Noop,
     ToggleMenu,
     CloseMenu,
@@ -67,7 +65,6 @@ pub enum PaneKind {
 
 #[derive(Debug)]
 pub struct App {
-    pub connection_manager: ConnectionManager,
     pub dialog: ConnectionDialog,
     pub settings: SettingsDialog,
     pub agent_config: AgentConfig,
@@ -93,7 +90,6 @@ impl Default for App {
         let mut actor = DatabaseKeeper::new(rx);
         tokio::spawn(async move { actor.run().await });
         Self {
-            connection_manager: ConnectionManager::default(),
             dialog: ConnectionDialog::default(),
             settings: SettingsDialog::default(),
             agent_config: AgentConfig::default(),
@@ -164,11 +160,6 @@ impl App {
                 if self.zoom_multiplier > 0 {
                     self.zoom_multiplier -= 1;
                 }
-                self.pending_save = true;
-                Task::none()
-            }
-            Message::ZoomReset => {
-                self.zoom_multiplier = 0;
                 self.pending_save = true;
                 Task::none()
             }
@@ -298,7 +289,12 @@ impl App {
                     Task::done(Message::DialogMessage(DialogMessage::OpenEdit(cfg)))
                 }
                 connection_config::Message::Duplicate(cfg) => {
-                    self.app_config.connections.push(cfg.clone());
+                    self.app_config
+                        .connections
+                        .push(connection_config::ConnectionConfig {
+                            id: Uuid::new_v4().to_string(),
+                            ..cfg.clone()
+                        });
                     let config = self.app_config.clone();
                     let tx = self.database_keeper_actor_tx.clone();
                     Task::batch([
@@ -374,11 +370,30 @@ impl App {
                     .iter()
                     .position(|cfg| cfg.id == config.id)
                 {
-                    self.app_config.connections[index] = config;
+                    self.app_config.connections[index] = config.clone();
                 } else {
-                    self.app_config.connections.push(config);
+                    self.app_config.connections.push(config.clone());
                 };
-                self.save_config().chain(Task::done(Message::DialogMessage(
+                let tx = self.database_keeper_actor_tx.clone();
+                Task::batch([
+                    Task::perform(
+                        async move {
+                            tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                database_keeper::ConnectionAction::Add { config },
+                            ))
+                            .await
+                            .context("send config to database keeper")
+                        },
+                        |res| {
+                            if let Err(err) = res {
+                                tracing::error!("{err}");
+                            }
+                            Message::Noop
+                        },
+                    ),
+                    self.save_config(),
+                ])
+                .chain(Task::done(Message::DialogMessage(
                     connection_dialog::DialogMessage::DialogClose,
                 )))
             }

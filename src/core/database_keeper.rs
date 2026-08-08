@@ -4,8 +4,8 @@ use sqlx::PgPool;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
+use crate::components::connection_config::ConnectionConfig;
 use crate::core::agent_tools::ToolError;
-use crate::core::connection_config::ConnectionConfig;
 use crate::db;
 
 #[derive(Debug, Clone)]
@@ -148,7 +148,11 @@ impl DatabaseKeeper {
                 }
             }
             ConnectionAction::Add { config } => {
-                self.configs.push(config);
+                if let Some(index) = self.configs.iter().position(|cfg| cfg.id == config.id) {
+                    self.configs[index] = config;
+                } else {
+                    self.configs.push(config);
+                }
             }
         }
     }

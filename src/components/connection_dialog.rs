@@ -1,7 +1,7 @@
 use iced::widget::{Row, button, column, container, row, text};
 use iced::{Color, Element, Length, Task, Theme};
 
-use crate::core::connection_config::ConnectionConfig;
+use crate::components::connection_config::ConnectionConfig;
 use crate::theme;
 use crate::ui::input_field::{InputField, InputFieldMessage};
 

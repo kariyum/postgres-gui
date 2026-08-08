@@ -1,4 +1,3 @@
-use iced::widget::text;
 use iced::widget::{container, markdown, row, space::horizontal};
 use iced::{Background, Color, Element, Theme};
 use serde::{Deserialize, Serialize};

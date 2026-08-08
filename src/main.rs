@@ -1,6 +1,5 @@
 mod app;
 mod components;
-mod connection_manager;
 mod core;
 mod db;
 mod theme;

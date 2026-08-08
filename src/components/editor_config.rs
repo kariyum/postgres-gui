@@ -1,4 +1,4 @@
-use crate::core::connection_config::ConnectionConfig;
+use crate::components::connection_config::ConnectionConfig;
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
@@ -36,7 +36,7 @@ pub enum Message {
 }
 
 #[derive(Debug, Clone)]
-enum ToolbarActions {
+pub enum ToolbarActions {
     RunQuery,
 }
 

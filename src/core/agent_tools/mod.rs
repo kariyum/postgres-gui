@@ -7,13 +7,12 @@ mod list_schemas;
 mod list_tables;
 mod show_table_stats;
 
-use std::collections::HashMap;
 use std::fmt;
 
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use tokio::sync::mpsc::Sender;
-use tracing::{error, info};
+use tracing::info;
 
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::ToolSet;

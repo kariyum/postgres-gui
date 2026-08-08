@@ -3,7 +3,6 @@ use iced::{
     widget::{button, column, container, text},
 };
 use serde::{Deserialize, Serialize};
-use tracing::info;
 use uuid::Uuid;
 
 use crate::theme;

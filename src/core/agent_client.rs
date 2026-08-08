@@ -7,11 +7,8 @@ use serde::{Deserialize, Serialize};
 use rig_core::client::{CompletionClient, ModelListingClient};
 use rig_core::completion::message::{AssistantContent, UserContent};
 use rig_core::completion::{CompletionModel, CompletionRequest, Message};
-use rig_core::message::ReasoningContent;
 use rig_core::providers::openai;
-use rig_core::streaming::{
-    StreamedAssistantContent, StreamingCompletionResponse, ToolCallDeltaContent,
-};
+use rig_core::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
 use rig_core::{OneOrMany, model::ModelList};
 use tracing::info;
 
@@ -72,13 +69,6 @@ pub async fn list_anthropic_models(api_key: String) -> anyhow::Result<Vec<String
         .context("Failed to parse Anthropic models response")?;
 
     Ok(response.data.into_iter().map(|m| m.id).collect())
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ChatRequest {
-    pub model: String,
-    pub messages: Vec<ChatMessage>,
-    pub stream: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -227,7 +217,7 @@ pub async fn prompt(
                 }
             }
             StreamedAssistantContent::ToolCallDelta {
-                id,
+                id: _,
                 internal_call_id,
                 content,
             } => {
@@ -249,7 +239,9 @@ pub async fn prompt(
             }
 
             StreamedAssistantContent::Final(response) => {
-                let extra = serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
+                let final_response =
+                    serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
+                tracing::info!("Final response {}", final_response);
                 ChatResponseChunk::Done
             }
         })

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::components::connection_config::ConnectionConfig;
 use crate::core::agent_config::AgentConfig;
-use crate::core::connection_config::ConnectionConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
