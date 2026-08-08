@@ -222,6 +222,7 @@ impl ConnectionDialog {
     }
 
     pub fn update(&mut self, message: DialogMessage) -> Task<DialogMessage> {
+        tracing::info!("{:?}", message);
         match message {
             DialogMessage::DialogNameField(msg) => {
                 self.form.name.update(msg);

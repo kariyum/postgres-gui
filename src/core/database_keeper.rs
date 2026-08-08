@@ -43,7 +43,8 @@ pub enum DatabaseKeeperMessage {
     ConnectionAction(ConnectionAction),
 }
 
-enum ConnectionAction {
+#[derive(Debug)]
+pub enum ConnectionAction {
     Delete { config: ConnectionConfig },
     Add { config: ConnectionConfig },
 }
@@ -104,7 +105,10 @@ impl DatabaseKeeper {
                     info!("UpdateConnections: {} config(s)", configs.len(),);
                     self.configs = configs;
                 }
-                DatabaseKeeperMessage::ConnectionAction(connection_action) => todo!(),
+                DatabaseKeeperMessage::ConnectionAction(connection_action) => {
+                    info!("ConnectionAction: {:?}", connection_action);
+                    self.handle_connection_action(connection_action)
+                }
             }
         }
     }
@@ -134,6 +138,19 @@ impl DatabaseKeeper {
             "Connected to '{}' (database: '{}', host: '{}:{}'). The database is now available for queries.",
             config.name, config.database, config.host, config.port
         ))
+    }
+
+    fn handle_connection_action(&mut self, connection_action: ConnectionAction) {
+        match connection_action {
+            ConnectionAction::Delete { config } => {
+                if let Some(index) = self.configs.iter().position(|cfg| cfg.id == config.id) {
+                    self.configs.remove(index);
+                }
+            }
+            ConnectionAction::Add { config } => {
+                self.configs.push(config);
+            }
+        }
     }
 }
 

@@ -12,7 +12,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
-use crate::components::connection_dialog::{ConnectionDialog, DialogMessage};
+use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage};
 use crate::components::connection_item::ItemMessage;
 use crate::components::editor::{self, Editor};
 use crate::components::editor_config::EditorConfig;
@@ -23,7 +23,7 @@ use crate::core::agent_tools::DatabaseKeeperMessage;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::connection_config::{self, ConnectionConfig};
-use crate::core::database_keeper::DatabaseKeeper;
+use crate::core::database_keeper::{self, DatabaseKeeper};
 use iced_aw::drop_down;
 
 use crate::theme;
@@ -83,7 +83,7 @@ pub struct App {
     agent_chat_pane: Option<pane_grid::Pane>,
     editor: Editor,
     database_keeper_actor_tx: Sender<DatabaseKeeperMessage>,
-    app_config: Option<AppConfig>,
+    app_config: AppConfig,
 }
 
 impl Default for App {
@@ -109,7 +109,7 @@ impl Default for App {
             agent_chat_pane: None,
             editor: Editor::default(),
             database_keeper_actor_tx: tx,
-            app_config: None,
+            app_config: AppConfig::default(),
         }
     }
 }
@@ -121,7 +121,7 @@ impl App {
             Message::AddConnection => Task::done(Message::CloseMenu)
                 .chain(Task::done(Message::DialogMessage(DialogMessage::OpenNew))),
             Message::ConfigLoaded(config) => {
-                self.app_config = Some(config.clone());
+                self.app_config = config.clone();
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
                 info!("Loaded config {:?}", config);
@@ -294,25 +294,103 @@ impl App {
                         cfg,
                     ))))
                 }
-                connection_config::Message::Edit(cfg) => Task::none(),
-                connection_config::Message::Duplicate(cfg) => Task::none(),
-                connection_config::Message::Delete(cfg) => Task::none(),
+                connection_config::Message::Edit(cfg) => {
+                    Task::done(Message::DialogMessage(DialogMessage::OpenEdit(cfg)))
+                }
+                connection_config::Message::Duplicate(cfg) => {
+                    self.app_config.connections.push(cfg.clone());
+                    let config = self.app_config.clone();
+                    let tx = self.database_keeper_actor_tx.clone();
+                    Task::batch([
+                        Task::perform(
+                            async move {
+                                tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                    database_keeper::ConnectionAction::Add { config: cfg },
+                                ))
+                                .await
+                                .context("send config to database keeper")
+                            },
+                            |res| {
+                                if let Err(err) = res {
+                                    tracing::error!("{err}");
+                                }
+                                Message::Noop
+                            },
+                        ),
+                        Task::perform(
+                            async move {
+                                tokio::task::spawn_blocking(move || {
+                                    config_loader::save_config(&config)
+                                })
+                                .await
+                                .context("Failed to save config")
+                                .flatten()
+                                .map_err(|err| err.to_string())
+                            },
+                            |res| {
+                                if let Err(err) = res {
+                                    tracing::error!(err);
+                                }
+                                Message::Noop
+                            },
+                        ),
+                    ])
+                }
+                connection_config::Message::Delete(config) => {
+                    if let Some(index) = self
+                        .app_config
+                        .connections
+                        .iter()
+                        .position(|cfg| cfg.id == config.id)
+                    {
+                        self.app_config.connections.remove(index);
+                    }
+                    let tx = self.database_keeper_actor_tx.clone();
+                    Task::batch([
+                        Task::perform(
+                            async move {
+                                tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                    database_keeper::ConnectionAction::Delete { config },
+                                ))
+                                .await
+                                .context("send config to database keeper")
+                            },
+                            |res| {
+                                if let Err(err) = res {
+                                    tracing::error!("{err}");
+                                }
+                                Message::Noop
+                            },
+                        ),
+                        self.save_config(),
+                    ])
+                }
             },
-            Message::DialogMessage(dialog_message) => todo!(),
+            Message::DialogMessage(connection_dialog::DialogMessage::DialogSaved(config)) => {
+                // if exists update otherwise add
+                if let Some(index) = self
+                    .app_config
+                    .connections
+                    .iter()
+                    .position(|cfg| cfg.id == config.id)
+                {
+                    self.app_config.connections[index] = config;
+                } else {
+                    self.app_config.connections.push(config);
+                };
+                self.save_config().chain(Task::done(Message::DialogMessage(
+                    connection_dialog::DialogMessage::DialogClose,
+                )))
+            }
+            Message::DialogMessage(dialog_message) => self
+                .dialog
+                .update(dialog_message)
+                .map(Message::DialogMessage),
         }
     }
 
     fn save_config(&self) -> Task<Message> {
-        let config = AppConfig {
-            connections: self
-                .connection_manager
-                .items
-                .iter()
-                .map(|i| i.cfg.clone())
-                .collect(),
-            zoom_multiplier: self.zoom_multiplier,
-            agent_config: self.agent_config.clone(),
-        };
+        let config = self.app_config.clone();
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || config_loader::save_config(&config))
@@ -448,11 +526,7 @@ impl App {
     }
 
     fn view_configs(&self) -> Element<'_, Message> {
-        let connections = self
-            .app_config
-            .as_ref()
-            .map(|config| &config.connections);
-        if connections.is_none_or(|list| list.is_empty()) {
+        if self.app_config.connections.is_empty() {
             button("Add Connection")
                 .on_press(Message::AddConnection)
                 .padding([8, 12])
@@ -461,7 +535,8 @@ impl App {
         } else {
             scrollable(
                 Column::from_vec(
-                    connections.unwrap()
+                    self.app_config
+                        .connections
                         .iter()
                         .map(|item| item.view().map(Message::ConnectionConfig).into())
                         .collect(),
