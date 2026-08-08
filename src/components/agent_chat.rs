@@ -18,7 +18,7 @@ use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Role};
 use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{DatabaseKeeperMessage, Tools, needs_approval};
-use crate::core::configured_provider::ConfiguredProvider;
+use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 
 #[derive(Clone, Debug)]
 pub enum AgentChatMessage {
@@ -35,6 +35,10 @@ pub enum AgentChatMessage {
     ToolExecutionResult {
         call_id: String,
         result: Result<String, String>,
+    },
+    ModelsLoaded {
+        models: Vec<String>,
+        base_provider: BaseProvider,
     },
     ModelSelected(String),
     ModelChanged(ConfiguredProvider),
@@ -221,6 +225,15 @@ impl AgentChat {
 
     pub fn update(&mut self, message: AgentChatMessage) -> Task<AgentChatMessage> {
         match message {
+            AgentChatMessage::ModelsLoaded {
+                models,
+                base_provider,
+            } => {
+                if base_provider == self.config.base_provider {
+                    self.config.available_models = models;
+                }
+                Task::none()
+            }
             AgentChatMessage::TogglePanel => {
                 self.visible = !self.visible;
                 Task::none()

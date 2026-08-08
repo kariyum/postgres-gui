@@ -17,6 +17,7 @@ use crate::components::connection_config;
 use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage};
 use crate::components::editor::{self, Editor};
 use crate::components::editor_config::EditorConfig;
+use crate::components::provider_config::ProviderConfigMessage;
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::DatabaseKeeperMessage;
@@ -55,6 +56,7 @@ pub enum Message {
     ConnectionConfig(connection_config::Message),
     Editor(editor::Message),
     DialogMessage(DialogMessage),
+    DatabaseKeeperReady(Sender<DatabaseKeeperMessage>),
 }
 
 #[derive(Debug)]
@@ -79,16 +81,13 @@ pub struct App {
     main_pane: pane_grid::Pane,
     agent_chat_pane: Option<pane_grid::Pane>,
     editor: Editor,
-    database_keeper_actor_tx: Sender<DatabaseKeeperMessage>,
+    database_keeper_actor_tx: Option<Sender<DatabaseKeeperMessage>>,
     app_config: AppConfig,
 }
 
 impl Default for App {
     fn default() -> Self {
         let (pane, main_pane) = pane_grid::State::new(PaneKind::Main);
-        let (tx, rx) = tokio::sync::mpsc::channel(1000);
-        let mut actor = DatabaseKeeper::new(rx);
-        tokio::spawn(async move { actor.run().await });
         Self {
             dialog: ConnectionDialog::default(),
             settings: SettingsDialog::default(),
@@ -104,7 +103,7 @@ impl Default for App {
             main_pane,
             agent_chat_pane: None,
             editor: Editor::default(),
-            database_keeper_actor_tx: tx,
+            database_keeper_actor_tx: None,
             app_config: AppConfig::default(),
         }
     }
@@ -113,6 +112,14 @@ impl Default for App {
 impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::DatabaseKeeperReady(tx) => {
+                self.database_keeper_actor_tx = Some(tx.clone());
+                if !self.app_config.connections.is_empty() {
+                    self.send_loaded_config(tx, self.app_config.connections.clone())
+                } else {
+                    Task::none()
+                }
+            }
             Message::Editor(msg) => self.editor.update(msg).map(Message::Editor),
             Message::AddConnection => Task::done(Message::CloseMenu)
                 .chain(Task::done(Message::DialogMessage(DialogMessage::OpenNew))),
@@ -121,26 +128,16 @@ impl App {
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
                 info!("Loaded config {:?}", config);
-                let tx = self.database_keeper_actor_tx.clone();
+                let tx_opt = self.database_keeper_actor_tx.clone();
                 Task::batch([
                     Task::done(Message::Settings(SettingsMessage::AgentConfig(
                         config.agent_config,
                     ))),
-                    Task::perform(
-                        async move {
-                            tx.send(DatabaseKeeperMessage::LoadedConfig {
-                                configs: config.connections,
-                            })
-                            .await
-                            .context("DatabaseKeeperActor failed on LoadedConfig message")
-                        },
-                        |result| {
-                            if let Err(err) = result {
-                                error!("{err}")
-                            }
-                            Message::Noop
-                        },
-                    ),
+                    if let Some(tx) = tx_opt {
+                        self.send_loaded_config(tx, config.connections)
+                    } else {
+                        Task::none()
+                    },
                 ])
             }
             Message::SavePending => {
@@ -208,6 +205,26 @@ impl App {
                 Task::none()
             }
             Message::Settings(msg) => {
+                if let Some(agent_chat) = self.agent_chat.as_mut() {
+                    if let SettingsMessage::AnthropicConfigMessage(
+                        ProviderConfigMessage::ModelsFetched(Ok(ref models)),
+                    ) = msg
+                    {
+                        let _ = agent_chat.update(AgentChatMessage::ModelsLoaded {
+                            models: models.clone(),
+                            base_provider: BaseProvider::Anthropic,
+                        });
+                    };
+                    if let SettingsMessage::OpenCodeConfigMessage(
+                        ProviderConfigMessage::ModelsFetched(Ok(ref models)),
+                    ) = msg
+                    {
+                        let _ = agent_chat.update(AgentChatMessage::ModelsLoaded {
+                            models: models.clone(),
+                            base_provider: BaseProvider::OpenCode,
+                        });
+                    };
+                }
                 use crate::components::settings_dialog::Action;
                 match self.settings.update(msg) {
                     Action::None => Task::none(),
@@ -255,26 +272,25 @@ impl App {
                 Task::none()
             }
             Message::AgentProviderSelected(mut provider) => {
-                provider.available_models = match provider.base_provider {
-                    BaseProvider::Anthropic => {
-                        self.settings.anthropic_config.available_models.clone()
-                    }
-                    BaseProvider::OpenCode => {
-                        self.settings.opencode_config.available_models.clone()
-                    }
-                };
+                if let Some(ref tx) = self.database_keeper_actor_tx {
+                    provider.available_models = match provider.base_provider {
+                        BaseProvider::Anthropic => {
+                            self.settings.anthropic_config.available_models.clone()
+                        }
+                        BaseProvider::OpenCode => {
+                            self.settings.opencode_config.available_models.clone()
+                        }
+                    };
 
-                self.agent_chat = Some(AgentChat::new(
-                    provider,
-                    self.database_keeper_actor_tx.clone(),
-                ));
-                self.agent_menu_open = false;
-                if let Some((agent_pane, _split)) = self.panes.split(
-                    pane_grid::Axis::Vertical,
-                    self.main_pane,
-                    PaneKind::AgentChat,
-                ) {
-                    self.agent_chat_pane = Some(agent_pane);
+                    self.agent_chat = Some(AgentChat::new(provider, tx.clone()));
+                    self.agent_menu_open = false;
+                    if let Some((agent_pane, _split)) = self.panes.split(
+                        pane_grid::Axis::Vertical,
+                        self.main_pane,
+                        PaneKind::AgentChat,
+                    ) {
+                        self.agent_chat_pane = Some(agent_pane);
+                    }
                 }
                 Task::none()
             }
@@ -296,23 +312,27 @@ impl App {
                             ..cfg.clone()
                         });
                     let config = self.app_config.clone();
-                    let tx = self.database_keeper_actor_tx.clone();
+                    let tx_opt = self.database_keeper_actor_tx.clone();
                     Task::batch([
-                        Task::perform(
-                            async move {
-                                tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                    database_keeper::ConnectionAction::Add { config: cfg },
-                                ))
-                                .await
-                                .context("send config to database keeper")
-                            },
-                            |res| {
-                                if let Err(err) = res {
-                                    tracing::error!("{err}");
-                                }
-                                Message::Noop
-                            },
-                        ),
+                        if let Some(tx) = tx_opt {
+                            Task::perform(
+                                async move {
+                                    tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                        database_keeper::ConnectionAction::Add { config: cfg },
+                                    ))
+                                    .await
+                                    .context("send config to database keeper")
+                                },
+                                |res| {
+                                    if let Err(err) = res {
+                                        tracing::error!("{err}");
+                                    }
+                                    Message::Noop
+                                },
+                            )
+                        } else {
+                            Task::none()
+                        },
                         Task::perform(
                             async move {
                                 tokio::task::spawn_blocking(move || {
@@ -341,23 +361,27 @@ impl App {
                     {
                         self.app_config.connections.remove(index);
                     }
-                    let tx = self.database_keeper_actor_tx.clone();
+                    let tx_opt = self.database_keeper_actor_tx.clone();
                     Task::batch([
-                        Task::perform(
-                            async move {
-                                tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                    database_keeper::ConnectionAction::Delete { config },
-                                ))
-                                .await
-                                .context("send config to database keeper")
-                            },
-                            |res| {
-                                if let Err(err) = res {
-                                    tracing::error!("{err}");
-                                }
-                                Message::Noop
-                            },
-                        ),
+                        if let Some(tx) = tx_opt {
+                            Task::perform(
+                                async move {
+                                    tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                        database_keeper::ConnectionAction::Delete { config },
+                                    ))
+                                    .await
+                                    .context("send config to database keeper")
+                                },
+                                |res| {
+                                    if let Err(err) = res {
+                                        tracing::error!("{err}");
+                                    }
+                                    Message::Noop
+                                },
+                            )
+                        } else {
+                            Task::none()
+                        },
                         self.save_config(),
                     ])
                 }
@@ -374,23 +398,27 @@ impl App {
                 } else {
                     self.app_config.connections.push(config.clone());
                 };
-                let tx = self.database_keeper_actor_tx.clone();
+                let tx_opt = self.database_keeper_actor_tx.clone();
                 Task::batch([
-                    Task::perform(
-                        async move {
-                            tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                database_keeper::ConnectionAction::Add { config },
-                            ))
-                            .await
-                            .context("send config to database keeper")
-                        },
-                        |res| {
-                            if let Err(err) = res {
-                                tracing::error!("{err}");
-                            }
-                            Message::Noop
-                        },
-                    ),
+                    if let Some(tx) = tx_opt {
+                        Task::perform(
+                            async move {
+                                tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                    database_keeper::ConnectionAction::Add { config },
+                                ))
+                                .await
+                                .context("send config to database keeper")
+                            },
+                            |res| {
+                                if let Err(err) = res {
+                                    tracing::error!("{err}");
+                                }
+                                Message::Noop
+                            },
+                        )
+                    } else {
+                        Task::none()
+                    },
                     self.save_config(),
                 ])
                 .chain(Task::done(Message::DialogMessage(
@@ -423,6 +451,26 @@ impl App {
         )
     }
 
+    fn send_loaded_config(
+        &self,
+        tx: Sender<DatabaseKeeperMessage>,
+        configs: Vec<crate::components::connection_config::ConnectionConfig>,
+    ) -> Task<Message> {
+        Task::perform(
+            async move {
+                tx.send(DatabaseKeeperMessage::LoadedConfig { configs })
+                    .await
+                    .context("DatabaseKeeperActor failed on LoadedConfig message")
+            },
+            |result| {
+                if let Err(err) = result {
+                    error!("{err}")
+                }
+                Message::Noop
+            },
+        )
+    }
+
     pub fn save_subscription(&self) -> Subscription<Message> {
         if self.pending_save {
             iced::time::every(Duration::from_millis(500)).map(|_| Message::SavePending)
@@ -433,6 +481,21 @@ impl App {
 
     pub fn window_event_subscription(&self) -> Subscription<Message> {
         window::resize_events().map(|(id, _size)| Message::WindowResized(id))
+    }
+
+    pub fn database_keeper_subscription(&self) -> Subscription<Message> {
+        struct DatabaseKeeperSub;
+        Subscription::run_with(std::any::TypeId::of::<DatabaseKeeperSub>(), |_| {
+            iced::stream::channel(
+                1000,
+                |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
+                    let (tx, rx) = tokio::sync::mpsc::channel(1000);
+                    let _ = output.try_send(Message::DatabaseKeeperReady(tx));
+                    let mut actor = DatabaseKeeper::new(rx, output);
+                    actor.run().await;
+                },
+            )
+        })
     }
 
     pub fn view_footer(&self) -> Element<'_, Message> {

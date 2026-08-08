@@ -53,14 +53,19 @@ pub struct DatabaseKeeper {
     configs: Vec<ConnectionConfig>,
     pools: HashMap<String, PgPool>,
     receiver: mpsc::Receiver<DatabaseKeeperMessage>,
+    ui_sender: iced::futures::channel::mpsc::Sender<crate::app::Message>,
 }
 
 impl DatabaseKeeper {
-    pub fn new(receiver: mpsc::Receiver<DatabaseKeeperMessage>) -> Self {
+    pub fn new(
+        receiver: mpsc::Receiver<DatabaseKeeperMessage>,
+        ui_sender: iced::futures::channel::mpsc::Sender<crate::app::Message>,
+    ) -> Self {
         Self {
             configs: vec![],
             pools: HashMap::new(),
             receiver,
+            ui_sender,
         }
     }
 
