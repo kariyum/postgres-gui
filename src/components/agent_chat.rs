@@ -1,7 +1,7 @@
 use iced::futures::Stream;
+use iced::futures::channel::mpsc::Sender;
 use std::collections::HashMap;
 use std::{format, matches};
-use iced::futures::channel::mpsc::Sender;
 use tracing::error;
 use tracing::info;
 use uuid::Uuid;
@@ -14,7 +14,7 @@ use iced::widget::{
 };
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 
-use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Role};
+use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Content, Role};
 use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{DatabaseKeeperMessage, Tools, needs_approval};
@@ -254,7 +254,7 @@ impl AgentChat {
                         let input = self.input.text();
                         info!("Send: input_len={}, stream_id=None", input.len());
 
-                        self.messages.push(ChatMsg::new(Role::User, input));
+                        self.messages.push(ChatMsg::new_content(Role::User, input));
                         self.input.perform(text_editor::Action::SelectAll);
                         self.input
                             .perform(text_editor::Action::Edit(text_editor::Edit::Delete));
@@ -288,29 +288,38 @@ impl AgentChat {
                         match msg {
                             agent_client::ChatResponseMessage::Content(delta) => {
                                 if let Some(last) = self.messages.last_mut()
-                                    && let Role::Assistant = last.role
+                                    && let ChatMsg::Content(Content {
+                                        role: Role::Assistant,
+                                        markdown_content,
+                                        content,
+                                    }) = last
                                 {
-                                    let prev = last.content.len();
-                                    last.content.push_str(&delta);
-                                    last.markdown_content.push_str(&delta);
+                                    content.push_str(&delta);
+                                    markdown_content.push_str(&delta);
                                     info!(
                                         "chunk Content: delta_len={}, total_len={}",
                                         delta.len(),
-                                        last.content.len()
+                                        content.len()
                                     );
                                 } else {
                                     info!("chunk Content (new msg): delta_len={}", delta.len());
-                                    self.messages.push(ChatMsg::new(Role::Assistant, delta));
+                                    self.messages
+                                        .push(ChatMsg::new_content(Role::Assistant, delta));
                                 }
                             }
                             agent_client::ChatResponseMessage::Thinking(delta) => {
                                 if let Some(last) = self.messages.last_mut()
-                                    && let Role::Thinking = last.role
+                                    && let ChatMsg::Content(Content {
+                                        role: Role::Thinking,
+                                        markdown_content,
+                                        content: _,
+                                    }) = last
                                 {
-                                    last.markdown_content.push_str(&delta);
+                                    markdown_content.push_str(&delta);
                                 } else {
                                     info!("chunk Thinking: delta_len={}", delta.len());
-                                    self.messages.push(ChatMsg::new(Role::Thinking, delta));
+                                    self.messages
+                                        .push(ChatMsg::new_content(Role::Thinking, delta));
                                 }
                             }
                         }
@@ -681,7 +690,8 @@ impl AgentChat {
                 entry.tool_name,
                 content.len()
             );
-            self.messages.push(ChatMsg::new(Role::Tool, content));
+            self.messages
+                .push(ChatMsg::new_tool(entry.args.clone(), entry.tool_name.clone(), content));
         }
 
         self.tool_call_entries.clear();

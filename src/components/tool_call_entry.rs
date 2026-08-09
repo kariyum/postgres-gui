@@ -37,72 +37,74 @@ impl ToolCallEntry {
 
     pub fn status_label(&self) -> &'static str {
         match &self.status {
-            ToolCallStatus::PendingApproval => "\u{26A0}\u{FE0F} Needs approval",
-            ToolCallStatus::Running => "\u{23F3} Running...",
-            ToolCallStatus::Completed => "\u{2705} Done",
-            ToolCallStatus::Failed => "\u{274C} Failed",
-            ToolCallStatus::Rejected => "\u{1F6AB} Rejected",
+            ToolCallStatus::PendingApproval => "Needs approval",
+            ToolCallStatus::Running => "Running...",
+            ToolCallStatus::Completed => "Done",
+            ToolCallStatus::Failed => "Failed",
+            ToolCallStatus::Rejected => "Rejected",
         }
     }
 
     pub fn view(&self) -> Element<'_, AgentChatMessage> {
         let mut children: Vec<Element<'_, AgentChatMessage>> = vec![
             row![
-                text(format!("{} {}", self.icon(), self.tool_name)).size(13),
+                text(format!(
+                    "{}",
+                    self.tool_name.replace("_", " ").to_uppercase()
+                ))
+                .size(13),
                 iced::widget::space::horizontal(),
-                text(self.status_label())
-                    .size(11)
-                    .color(Color::from_rgba(0.7, 0.7, 0.9, 1.0,)),
+                text(self.status_label()).size(11),
             ]
             .spacing(8)
             .into(),
-            container(text(&self.args).size(11))
-                .padding([4, 6])
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.2))),
-                    border: Border {
-                        color: Color::from_rgba(0.5, 0.5, 0.8, 0.2),
-                        width: 1.0,
-                        radius: Radius::new(4.0),
-                    },
-                    ..Default::default()
-                })
-                .into(),
+            // container(text(&self.args).size(11))
+            //     .padding([4, 6])
+            //     .style(|_: &Theme| container::Style {
+            //         background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.2))),
+            //         border: Border {
+            //             color: Color::from_rgba(0.5, 0.5, 0.8, 0.2),
+            //             width: 1.0,
+            //             radius: Radius::new(4.0),
+            //         },
+            //         ..Default::default()
+            //     })
+            //     .into(),
         ];
 
-        if let Some(result) = &self.result {
-            children.push(
-                container(text(result).size(11))
-                    .padding([4, 6])
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.0, 0.2, 0.0, 0.15))),
-                        border: Border {
-                            color: Color::from_rgba(0.3, 0.8, 0.3, 0.3),
-                            width: 1.0,
-                            radius: Radius::new(4.0),
-                        },
-                        ..Default::default()
-                    })
-                    .into(),
-            );
-        }
+        // if let Some(result) = &self.result {
+        //     children.push(
+        //         container(text(result).size(11))
+        //             .padding([4, 6])
+        //             .style(|_: &Theme| container::Style {
+        //                 background: Some(Background::Color(Color::from_rgba(0.0, 0.2, 0.0, 0.15))),
+        //                 border: Border {
+        //                     color: Color::from_rgba(0.3, 0.8, 0.3, 0.3),
+        //                     width: 1.0,
+        //                     radius: Radius::new(4.0),
+        //                 },
+        //                 ..Default::default()
+        //             })
+        //             .into(),
+        //     );
+        // }
 
-        if let Some(error) = &self.error {
-            children.push(
-                container(text(error).size(11).color(Color::from_rgb(1.0, 0.3, 0.3)))
-                    .padding([4, 6])
-                    .style(|_: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.15))),
-                        border: Border {
-                            color: Color::from_rgba(1.0, 0.3, 0.3, 0.3),
-                            width: 1.0,
-                            radius: Radius::new(4.0),
-                        },
-                        ..Default::default()
-                    })
-                    .into(),
-            );
-        }
+        // if let Some(error) = &self.error {
+        //     children.push(
+        //         container(text(error).size(11).color(Color::from_rgb(1.0, 0.3, 0.3)))
+        //             .padding([4, 6])
+        //             .style(|_: &Theme| container::Style {
+        //                 background: Some(Background::Color(Color::from_rgba(0.3, 0.0, 0.0, 0.15))),
+        //                 border: Border {
+        //                     color: Color::from_rgba(1.0, 0.3, 0.3, 0.3),
+        //                     width: 1.0,
+        //                     radius: Radius::new(4.0),
+        //                 },
+        //                 ..Default::default()
+        //             })
+        //             .into(),
+        //     );
+        // }
 
         if let ToolCallStatus::PendingApproval = &self.status {
             children.push(
