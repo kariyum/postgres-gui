@@ -1,9 +1,9 @@
+use iced::futures::channel::mpsc::Sender;
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Column, Row, TypeInfo};
-use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError, cell_to_value, get_pool};
 

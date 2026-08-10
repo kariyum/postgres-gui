@@ -1,7 +1,9 @@
 use iced::widget::{container, markdown, row, space::horizontal, text};
 use iced::{Background, Color, Element, Theme};
+use rig_core::providers::openai::ToolCall;
 use serde::{Deserialize, Serialize};
 
+use crate::components::tool_call_entry::{self, ToolCallEntry};
 use crate::core::agent_client::ChatMessage;
 
 #[derive(Debug)]
@@ -12,16 +14,9 @@ pub struct Content {
 }
 
 #[derive(Debug)]
-pub struct Tool {
-    pub args: String,
-    pub tool_name: String,
-    pub result: String,
-}
-
-#[derive(Debug)]
 pub enum ChatMsg {
     Content(Content),
-    Tool(Tool),
+    Tool(ToolCallEntry),
 }
 
 impl Clone for ChatMsg {
@@ -36,15 +31,7 @@ impl Clone for ChatMsg {
                 content: content.clone(),
                 markdown_content: markdown::Content::parse(&content),
             }),
-            ChatMsg::Tool(Tool {
-                args,
-                tool_name,
-                result,
-            }) => ChatMsg::Tool(Tool {
-                args: args.clone(),
-                tool_name: tool_name.clone(),
-                result: result.clone(),
-            }),
+            ChatMsg::Tool(tool_call_entry) => ChatMsg::Tool(tool_call_entry.clone()),
         }
     }
 }
@@ -58,12 +45,8 @@ impl ChatMsg {
         })
     }
 
-    pub fn new_tool(args: String, tool_name: String, result: String) -> ChatMsg {
-        ChatMsg::Tool(Tool {
-            args,
-            tool_name,
-            result,
-        })
+    pub fn new_tool(tool_call_entry: ToolCallEntry) -> ChatMsg {
+        ChatMsg::Tool(tool_call_entry)
     }
 
     pub fn view(&self) -> Element<'_, ChatMsgMessage> {
@@ -99,10 +82,8 @@ impl ChatMsg {
         .into()
     }
 
-    fn view_tool<'a>(&'a self, tool: &'a Tool) -> Element<'a, ChatMsgMessage> {
-        container(text(tool.tool_name.as_str()))
-            .padding([8, 12])
-            .into()
+    fn view_tool<'a>(&'a self, tool: &'a ToolCallEntry) -> Element<'a, ChatMsgMessage> {
+        container(text(tool.tool_name.as_str())).padding([8, 12]).into()
     }
 }
 
@@ -115,7 +96,7 @@ impl Into<ChatMessage> for ChatMsg {
             },
             ChatMsg::Tool(tool) => ChatMessage {
                 content: format!(
-                    "Tool '{}' was called with args: {}\n\nResult:\n{}",
+                    "Tool '{}' was called with args: {}\n\nResult:\n{:?}",
                     tool.tool_name, tool.args, tool.result
                 ),
                 role: Role::Tool,

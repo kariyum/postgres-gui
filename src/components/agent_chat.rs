@@ -15,7 +15,7 @@ use iced::widget::{
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 
 use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Content, Role};
-use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus};
+use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus, ToolDetails};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{DatabaseKeeperMessage, Tools, needs_approval};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
@@ -377,13 +377,17 @@ impl AgentChat {
                             ToolCallStatus::Running
                         };
 
+                        let tool_details = ToolDetails::new(tool_name.clone(), args.clone())
+                            .map_err(|err| err.to_string());
+
                         self.tool_call_entries.push(ToolCallEntry {
                             call_id: call_id.clone(),
-                            tool_name: tool_name.clone(),
-                            args: args.clone(),
+                            tool_details,
                             result: None,
                             error: None,
                             status,
+                            tool_name: tool_name.clone(),
+                            args: args.clone(),
                         });
 
                         if !needs_approval {
@@ -602,13 +606,17 @@ impl AgentChat {
                 tool_name, needs_approval
             );
 
+            let tool_details =
+                ToolDetails::new(tool_name.clone(), args.clone()).map_err(|err| err.to_string());
+
             self.tool_call_entries.push(ToolCallEntry {
                 call_id: call_id.clone(),
-                tool_name: tool_name.clone(),
-                args: args.clone(),
+                tool_details: tool_details,
                 result: None,
                 error: None,
                 status,
+                tool_name: tool_name.clone(),
+                args: args.clone(),
             });
 
             if !needs_approval {
@@ -690,8 +698,7 @@ impl AgentChat {
                 entry.tool_name,
                 content.len()
             );
-            self.messages
-                .push(ChatMsg::new_tool(entry.args.clone(), entry.tool_name.clone(), content));
+            self.messages.push(ChatMsg::new_tool(entry.clone()));
         }
 
         self.tool_call_entries.clear();

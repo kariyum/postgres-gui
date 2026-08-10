@@ -1,17 +1,17 @@
-mod connect_to_database;
-mod describe_table;
-mod execute_sql;
-mod explain_query;
-mod list_connections;
-mod list_schemas;
-mod list_tables;
-mod show_table_stats;
+pub mod connect_to_database;
+pub mod describe_table;
+pub mod execute_sql;
+pub mod explain_query;
+pub mod list_connections;
+pub mod list_schemas;
+pub mod list_tables;
+pub mod show_table_stats;
 
 use std::fmt;
 
+use iced::futures::channel::mpsc::Sender;
 use serde_json::Value;
 use sqlx::Row;
-use iced::futures::channel::mpsc::Sender;
 use tracing::info;
 
 use rig_core::completion::ToolDefinition;
@@ -111,7 +111,6 @@ pub fn cell_to_value(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -
 #[derive(Clone)]
 pub struct Tools {
     toolset: std::sync::Arc<ToolSet>,
-    sender: Sender<DatabaseKeeperMessage>,
 }
 
 impl std::fmt::Debug for Tools {
@@ -134,7 +133,6 @@ impl Tools {
 
         Self {
             toolset: std::sync::Arc::new(toolset),
-            sender,
         }
     }
 
