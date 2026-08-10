@@ -85,7 +85,7 @@ impl DatabaseKeeper {
                             self.pools.keys().collect::<Vec<_>>()
                         );
                         ToolError(format!(
-                            "Database '{}' not found. Available: {:?}",
+                            "Database '{}' not found of not connected yet. Please connect to the database you would with exposed tools. Connected databases: {:?}",
                             database_name,
                             self.pools.keys().collect::<Vec<_>>()
                         ))

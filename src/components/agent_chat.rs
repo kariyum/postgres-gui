@@ -2,8 +2,7 @@ use iced::futures::Stream;
 use iced::futures::channel::mpsc::Sender;
 use std::collections::HashMap;
 use std::{format, matches};
-use tracing::error;
-use tracing::info;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use iced::keyboard::key::{self};
@@ -55,9 +54,15 @@ pub struct AgentChat {
     stream_id: Option<Uuid>,
     auto_scroll: bool,
     tool_manager: Tools,
-    pending_tool_calls: HashMap<String, (String, String)>,
+    pending_tool_calls: HashMap<String, ToolCallChunk>,
     tool_call_entries: Vec<ToolCallEntry>,
     chosen_model: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ToolCallChunk {
+    tool_name: String,
+    args: String,
 }
 
 impl AgentChat {
@@ -325,37 +330,6 @@ impl AgentChat {
                         }
                     }
 
-                    ChatResponseChunk::ToolCallStarted {
-                        call_id,
-                        tool_name,
-                        initial_args,
-                    } => {
-                        info!(
-                            "ToolCallStarted: call_id={}, tool_name={}, initial_args_len={}",
-                            call_id,
-                            tool_name,
-                            initial_args.len()
-                        );
-                        self.pending_tool_calls
-                            .insert(call_id, (tool_name, initial_args));
-                    }
-                    ChatResponseChunk::ToolCallDelta {
-                        call_id,
-                        args_delta,
-                    } => {
-                        if let Some((_, args)) = self.pending_tool_calls.get_mut(&call_id) {
-                            let prev = args.len();
-                            args.push_str(&args_delta);
-                            info!(
-                                "ToolCallDelta: call_id={}, delta_len={}, total_len={}",
-                                call_id,
-                                args_delta.len(),
-                                args.len()
-                            );
-                        } else {
-                            info!("ToolCallDelta: call_id={} NOT FOUND in pending", call_id);
-                        }
-                    }
                     ChatResponseChunk::ToolCallComplete {
                         call_id,
                         tool_name,
@@ -585,12 +559,12 @@ impl AgentChat {
             count
         );
 
-        let pending: HashMap<String, (String, String)> = self.pending_tool_calls.drain().collect();
+        let pending: HashMap<String, ToolCallChunk> = self.pending_tool_calls.drain().collect();
         let mut exec_tasks: Vec<Task<AgentChatMessage>> = Vec::new();
 
-        for (call_id, (tool_name, args)) in pending {
+        for (call_id, ToolCallChunk { tool_name, args }) in pending {
             if args.is_empty() {
-                info!("flush_pending: skipping {tool_name} ({call_id}) with empty args");
+                warn!("flush_pending: skipping {tool_name} ({call_id}) with empty args");
                 continue;
             }
 
@@ -608,6 +582,10 @@ impl AgentChat {
 
             let tool_details =
                 ToolDetails::new(tool_name.clone(), args.clone()).map_err(|err| err.to_string());
+
+            if let Err(ref err) = tool_details {
+                tracing::warn!("Failed to deserialize args {err}")
+            }
 
             self.tool_call_entries.push(ToolCallEntry {
                 call_id: call_id.clone(),

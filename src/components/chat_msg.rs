@@ -1,4 +1,5 @@
-use iced::widget::{container, markdown, row, space::horizontal, text};
+use iced::widget::{column, container, markdown, row, space::horizontal, text};
+use iced::widget::{space, text_editor};
 use iced::{Background, Color, Element, Theme};
 use rig_core::providers::openai::ToolCall;
 use serde::{Deserialize, Serialize};
@@ -83,7 +84,56 @@ impl ChatMsg {
     }
 
     fn view_tool<'a>(&'a self, tool: &'a ToolCallEntry) -> Element<'a, ChatMsgMessage> {
-        container(text(tool.tool_name.as_str())).padding([8, 12]).into()
+        let error: Element<ChatMsgMessage> = if let Some(ref err) = tool.error {
+            text(err).into()
+        } else {
+            space().into()
+        };
+
+        let result: Element<ChatMsgMessage> = if let Some(ref result) = tool.result {
+            text(result).into()
+        } else {
+            space().into()
+        };
+
+        let args: Element<ChatMsgMessage> = if let Ok(ref tool_details) = tool.tool_details {
+            match tool_details.args {
+                tool_call_entry::ToolArgs::ConnectToDatabase(ref args) => {
+                    text(format!("Connect to {}", args.database_name)).into()
+                }
+                tool_call_entry::ToolArgs::DescribeTable(ref args) => text(format!(
+                    "@{} describe table {}.{}",
+                    args.database_name, args.schema, args.table
+                ))
+                .into(),
+                tool_call_entry::ToolArgs::ExecuteSQL(ref args) => column![
+                    text(format!("Execute SQL on {}", args.database_name,)),
+                    text(args.sql.as_str())
+                ]
+                .into(),
+                tool_call_entry::ToolArgs::ExplainQuery(ref args) => {
+                    text(format!("Explaning query {}", args.sql)).into()
+                }
+                tool_call_entry::ToolArgs::ListConnections(_) => text("List Connections").into(),
+                tool_call_entry::ToolArgs::ListSchemas(ref args) => {
+                    text(format!("List Schemas on {}", args.database_name)).into()
+                }
+                tool_call_entry::ToolArgs::ListTables(ref args) => text(format!(
+                    "List Tables {}.{}",
+                    args.database_name, args.schema
+                ))
+                .into(),
+                tool_call_entry::ToolArgs::ShowTableStats(ref args) => {
+                    text(format!("Show Table Stats {}", args.table)).into()
+                }
+            }
+        } else {
+            space().into()
+        };
+
+        container(column![args, error, result,])
+            .padding([8, 12])
+            .into()
     }
 }
 
@@ -96,8 +146,8 @@ impl Into<ChatMessage> for ChatMsg {
             },
             ChatMsg::Tool(tool) => ChatMessage {
                 content: format!(
-                    "Tool '{}' was called with args: {}\n\nResult:\n{:?}",
-                    tool.tool_name, tool.args, tool.result
+                    "Tool '{}' was called with args: {}\n\nResult:\n{:?} Error: \n{:?}",
+                    tool.tool_name, tool.args, tool.result, tool.error
                 ),
                 role: Role::Tool,
             },

@@ -86,15 +86,6 @@ pub enum ChatResponseMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChatResponseChunk {
     Message(ChatResponseMessage),
-    ToolCallStarted {
-        call_id: String,
-        tool_name: String,
-        initial_args: String,
-    },
-    ToolCallDelta {
-        call_id: String,
-        args_delta: String,
-    },
     ToolCallComplete {
         call_id: String,
         tool_name: String,
@@ -138,7 +129,7 @@ fn build_preamble() -> String {
         5. Content Isolation: Never include markdown formatting, conversational filler, or prose inside the ```sql code block itself—keep the code completely raw and ready to execute.
 
         Tool Usage:
-        You have PostgreSQL database tools available. Use them to inspect the database schema and execute queries when asked about database contents. Destructive operations (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE) will require user approval before execution.",
+        You have PostgreSQL database tools available. Use them to inspect the database schema and execute queries when asked about database contents. Ask which connection configuration to use if no active connection is availble. Destructive operations (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE) will require user approval before execution.",
         ""
     )
 }
@@ -197,55 +188,44 @@ pub async fn prompt(
         .await
         .context("Failed to start streaming completion")?;
 
-    let mapped = stream.map(move |item| {
-        item.map(|content| match content {
-            StreamedAssistantContent::Text(text) => {
-                ChatResponseChunk::Message(ChatResponseMessage::Content(text.text))
-            }
-            StreamedAssistantContent::ToolCall {
-                tool_call,
-                internal_call_id,
-            } => {
-                let initial_args = match tool_call.function.arguments {
-                    serde_json::Value::String(s) => s,
-                    other => other.to_string(),
-                };
-                ChatResponseChunk::ToolCallStarted {
-                    call_id: internal_call_id,
-                    tool_name: tool_call.function.name,
-                    initial_args,
+    let mapped = stream.filter_map(move |item| async {
+        match item {
+            Ok(content) => match content {
+                StreamedAssistantContent::Text(text) => Some(Ok(ChatResponseChunk::Message(
+                    ChatResponseMessage::Content(text.text),
+                ))),
+                StreamedAssistantContent::ToolCall {
+                    tool_call,
+                    internal_call_id,
+                } => {
+                    let args = match tool_call.function.arguments {
+                        serde_json::Value::String(s) => s,
+                        other => other.to_string(),
+                    };
+                    Some(Ok(ChatResponseChunk::ToolCallComplete {
+                        call_id: internal_call_id,
+                        tool_name: tool_call.function.name,
+                        args,
+                    }))
                 }
-            }
-            StreamedAssistantContent::ToolCallDelta {
-                id: _,
-                internal_call_id,
-                content,
-            } => {
-                let delta_text = match content {
-                    ToolCallDeltaContent::Name(n) => n,
-                    ToolCallDeltaContent::Delta(d) => d,
-                };
-                ChatResponseChunk::ToolCallDelta {
-                    call_id: internal_call_id,
-                    args_delta: delta_text,
+                StreamedAssistantContent::ToolCallDelta { .. } => None,
+                StreamedAssistantContent::Reasoning(reasoning) => {
+                    Some(Ok(ChatResponseChunk::Message(
+                        ChatResponseMessage::Thinking(reasoning.display_text()),
+                    )))
                 }
-            }
-            StreamedAssistantContent::Reasoning(reasoning) => {
-                ChatResponseChunk::Message(ChatResponseMessage::Thinking(reasoning.display_text()))
-            }
-
-            StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
-                ChatResponseChunk::Message(ChatResponseMessage::Thinking(reasoning))
-            }
-
-            StreamedAssistantContent::Final(response) => {
-                let final_response =
-                    serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
-                tracing::info!("Final response {}", final_response);
-                ChatResponseChunk::Done
-            }
-        })
-        .map_err(Into::into)
+                StreamedAssistantContent::ReasoningDelta { reasoning, .. } => Some(Ok(
+                    ChatResponseChunk::Message(ChatResponseMessage::Thinking(reasoning)),
+                )),
+                StreamedAssistantContent::Final(response) => {
+                    let final_response =
+                        serde_json::to_string(&response).unwrap_or_else(|_| "N/A".into());
+                    tracing::info!("Final response {}", final_response);
+                    Some(Ok(ChatResponseChunk::Done))
+                }
+            },
+            Err(e) => Some(Err(e.into())),
+        }
     });
 
     Ok(mapped)
