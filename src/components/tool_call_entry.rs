@@ -25,34 +25,6 @@ pub struct ToolCallEntry {
     pub tool_details: Result<ToolDetails, String>,
 }
 
-#[derive(Clone, Debug)]
-pub enum ToolName {
-    ConnectToDatabase,
-    DescribeTable,
-    ExecuteSQL,
-    ExplainQuery,
-    ListConnections,
-    ListSchemas,
-    ListTables,
-    ShowTableStats,
-}
-
-impl ToolName {
-    fn from_str(str: String) -> anyhow::Result<ToolName> {
-        match str.as_str() {
-            "connect_to_database" => Ok(ToolName::ConnectToDatabase),
-            "describe_table" => Ok(ToolName::DescribeTable),
-            "execute_sql" => Ok(ToolName::ExecuteSQL),
-            "explain_query" => Ok(ToolName::ExplainQuery),
-            "list_connections" => Ok(ToolName::ListConnections),
-            "list_schemas" => Ok(ToolName::ListSchemas),
-            "list_tables" => Ok(ToolName::ListTables),
-            "show_table_stats" => Ok(ToolName::ShowTableStats),
-            _ => anyhow::bail!("Unknown tool: {}", str),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub enum ToolArgs {
     ConnectToDatabase(ConnectToDatabaseArgs),
@@ -67,46 +39,41 @@ pub enum ToolArgs {
 
 #[derive(Clone, Debug)]
 pub struct ToolDetails {
-    pub name: ToolName,
     pub args: ToolArgs,
 }
 
 impl ToolDetails {
-    pub fn new(tool_name: String, args: String) -> anyhow::Result<ToolDetails> {
-        let name = ToolName::from_str(tool_name)?;
-        let args = ToolArgs::new(name.clone(), args)?;
-        Ok(ToolDetails { name, args })
+    pub fn new(tool_name: &str, args: String) -> anyhow::Result<ToolDetails> {
+        let args = ToolArgs::new(tool_name, args);
+        if let Err(ref err) = args {
+            tracing::warn!("ToolArgs construction failed with {err}")
+        }
+        Ok(ToolDetails { args: args? })
     }
 }
 
 impl ToolArgs {
-    fn new(tool_name: ToolName, args: String) -> anyhow::Result<ToolArgs> {
-        match tool_name {
-            ToolName::ConnectToDatabase => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ConnectToDatabase args")
+    fn new(tool_name: &str, args: String) -> anyhow::Result<ToolArgs> {
+        let result = match tool_name {
+            "connect_to_database" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ConnectToDatabase),
-            ToolName::DescribeTable => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize DescribeTable args")
+            "describe_table" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::DescribeTable),
-            ToolName::ExecuteSQL => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ExecuteSQL args")
+            "execute_sql" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ExecuteSQL),
-            ToolName::ExplainQuery => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ExplainQuery args")
+            "explain_query" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ExplainQuery),
-            ToolName::ListConnections => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ListConnections args")
+            "list_connections" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ListConnections),
-            ToolName::ListSchemas => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ListSchemas args")
+            "list_schemas" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ListSchemas),
-            ToolName::ListTables => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ListTables args")
+            "list_tables" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ListTables),
-            ToolName::ShowTableStats => serde_json::from_str(args.as_str())
-                .context("Failed to deserialize ShowTableStats args")
+            "show_table_stats" => serde_json::from_str(args.as_str())
                 .map(ToolArgs::ShowTableStats),
-        }
+            other => anyhow::bail!("Unknown tool: {other}"),
+        };
+        result.context(format!("Failed to deserialize {tool_name} {args}"))
     }
 }
 

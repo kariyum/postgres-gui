@@ -351,7 +351,7 @@ impl AgentChat {
                             ToolCallStatus::Running
                         };
 
-                        let tool_details = ToolDetails::new(tool_name.clone(), args.clone())
+                        let tool_details = ToolDetails::new(&tool_name, args.clone())
                             .map_err(|err| err.to_string());
 
                         self.tool_call_entries.push(ToolCallEntry {
@@ -581,7 +581,7 @@ impl AgentChat {
             );
 
             let tool_details =
-                ToolDetails::new(tool_name.clone(), args.clone()).map_err(|err| err.to_string());
+                ToolDetails::new(&tool_name, args.clone()).map_err(|err| err.to_string());
 
             if let Err(ref err) = tool_details {
                 tracing::warn!("Failed to deserialize args {err}")
