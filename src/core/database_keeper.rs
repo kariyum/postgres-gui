@@ -124,7 +124,7 @@ impl DatabaseKeeper {
         let config = self
             .configs
             .iter()
-            .find(|c| c.name == database_name || c.id == database_name)
+            .find(|c| c.name == database_name || c.id == database_name || c.database == database_name)
             .ok_or_else(|| {
                 ToolError(format!(
                     "No saved connection named '{}'. Use list_connections to see available connections.",
@@ -142,8 +142,8 @@ impl DatabaseKeeper {
         info!("ConnectDatabase: connected to '{}'", config.name);
 
         Ok(format!(
-            "Connected to '{}' (database: '{}', host: '{}:{}'). The database is now available for queries.",
-            config.name, config.database, config.host, config.port
+            "Connected to '{}' (database: '{}'). The database is now available for queries.",
+            config.name, config.database
         ))
     }
 

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+use crate::components::chat_msg::ChatMsg;
 use crate::components::connection_config::ConnectionConfig;
 use crate::core::agent_config::AgentConfig;
 
@@ -56,4 +57,28 @@ pub fn save_config(config: &AppConfig) -> anyhow::Result<()> {
     let writer = BufWriter::new(file);
     serde_json::to_writer_pretty(writer, config).context("Failed to serialize config")?;
     Ok(())
+}
+
+pub fn agent_sessions_config_path() -> Option<PathBuf> {
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+        .map(PathBuf::from);
+    home.map(|path| {
+        path.join(".config")
+            .join("pgeru")
+            .join("agent_session.json")
+    })
+}
+
+pub fn load_agent_session() -> anyhow::Result<Vec<ChatMsg>> {
+    if let Some(path) = agent_sessions_config_path()
+        && path.exists()
+    {
+        let file = File::open(&path).context("Failed to open file")?;
+        let reader = BufReader::new(file);
+        serde_json::from_reader(reader).context("Failed to deserialize")
+    } else {
+        Ok(vec![])
+    }
 }

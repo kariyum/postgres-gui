@@ -1,7 +1,6 @@
 use iced::widget::{column, container, markdown, row, space::horizontal, text};
 use iced::widget::{space, text_editor};
 use iced::{Background, Color, Element, Theme};
-use rig_core::providers::openai::ToolCall;
 use serde::{Deserialize, Serialize};
 
 use crate::components::tool_call_entry::{self, ToolCallEntry};
@@ -14,7 +13,34 @@ pub struct Content {
     pub markdown_content: markdown::Content,
 }
 
-#[derive(Debug)]
+impl Serialize for Content {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("Content", 2)?;
+        state.serialize_field("role", &self.role)?;
+        state.serialize_field("content", &self.content)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Content {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct ContentHelper {
+            role: Role,
+            content: String,
+        }
+
+        let helper = ContentHelper::deserialize(deserializer)?;
+        Ok(Content {
+            role: helper.role,
+            content: helper.content.clone(),
+            markdown_content: markdown::Content::parse(&helper.content),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ChatMsg {
     Content(Content),
     Tool(ToolCallEntry),
@@ -53,7 +79,7 @@ impl ChatMsg {
     pub fn view(&self) -> Element<'_, ChatMsgMessage> {
         match self {
             ChatMsg::Content(content) => self.view_content(content),
-            ChatMsg::Tool(tool) => self.view_tool(tool),
+            ChatMsg::Tool(tool) => tool.view().map(|_| ChatMsgMessage::ToolAction).into(),
         }
     }
 
@@ -82,59 +108,6 @@ impl ChatMsg {
         ])
         .into()
     }
-
-    fn view_tool<'a>(&'a self, tool: &'a ToolCallEntry) -> Element<'a, ChatMsgMessage> {
-        let error: Element<ChatMsgMessage> = if let Some(ref err) = tool.error {
-            text(err).into()
-        } else {
-            space().into()
-        };
-
-        let result: Element<ChatMsgMessage> = if let Some(ref result) = tool.result {
-            text(result).into()
-        } else {
-            space().into()
-        };
-
-        let args: Element<ChatMsgMessage> = if let Ok(ref tool_details) = tool.tool_details {
-            match tool_details.args {
-                tool_call_entry::ToolArgs::ConnectToDatabase(ref args) => {
-                    text(format!("Connect to {}", args.database_name)).into()
-                }
-                tool_call_entry::ToolArgs::DescribeTable(ref args) => text(format!(
-                    "@{} describe table {}.{}",
-                    args.database_name, args.schema, args.table
-                ))
-                .into(),
-                tool_call_entry::ToolArgs::ExecuteSQL(ref args) => column![
-                    text(format!("Execute SQL on {}", args.database_name,)),
-                    text(args.sql.as_str())
-                ]
-                .into(),
-                tool_call_entry::ToolArgs::ExplainQuery(ref args) => {
-                    text(format!("Explaning query {}", args.sql)).into()
-                }
-                tool_call_entry::ToolArgs::ListConnections(_) => text("List Connections").into(),
-                tool_call_entry::ToolArgs::ListSchemas(ref args) => {
-                    text(format!("List Schemas on {}", args.database_name)).into()
-                }
-                tool_call_entry::ToolArgs::ListTables(ref args) => text(format!(
-                    "List Tables {}.{}",
-                    args.database_name, args.schema
-                ))
-                .into(),
-                tool_call_entry::ToolArgs::ShowTableStats(ref args) => {
-                    text(format!("Show Table Stats {}", args.table)).into()
-                }
-            }
-        } else {
-            space().into()
-        };
-
-        container(column![args, error, result,])
-            .padding([8, 12])
-            .into()
-    }
 }
 
 impl Into<ChatMessage> for ChatMsg {
@@ -158,6 +131,7 @@ impl Into<ChatMessage> for ChatMsg {
 #[derive(Clone, Debug)]
 pub enum ChatMsgMessage {
     LinkClicked(markdown::Uri),
+    ToolAction,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

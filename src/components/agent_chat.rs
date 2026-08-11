@@ -14,9 +14,10 @@ use iced::widget::{
 use iced::{Background, Border, Color, Element, Length, Task, Theme, keyboard};
 
 use crate::components::chat_msg::{ChatMsg, ChatMsgMessage, Content, Role};
-use crate::components::tool_call_entry::{ToolCallEntry, ToolCallStatus, ToolDetails};
+use crate::components::tool_call_entry::{self, ToolCallEntry, ToolCallStatus, ToolDetails};
 use crate::core::agent_client::{self, ChatMessage, ChatResponseChunk};
 use crate::core::agent_tools::{DatabaseKeeperMessage, Tools, needs_approval};
+use crate::core::config_loader::load_agent_session;
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 
 #[derive(Clone, Debug)]
@@ -29,8 +30,6 @@ pub enum AgentChatMessage {
     StreamError(String),
     StreamFinished,
     UserScrolled(scrollable::Viewport),
-    ApproveToolCall(String),
-    RejectToolCall(String),
     ToolExecutionResult {
         call_id: String,
         result: Result<String, String>,
@@ -42,6 +41,8 @@ pub enum AgentChatMessage {
     ModelSelected(String),
     ModelChanged(ConfiguredProvider),
     ResetChat,
+    LoadChat,
+    ToolMessage(tool_call_entry::Message),
 }
 
 #[derive(Clone, Debug)]
@@ -54,7 +55,7 @@ pub struct AgentChat {
     stream_id: Option<Uuid>,
     auto_scroll: bool,
     tool_manager: Tools,
-    pending_tool_calls: HashMap<String, ToolCallChunk>,
+    pending_tool_calls: HashMap<String, ToolCallChunk>, // TODO REMOVE
     tool_call_entries: Vec<ToolCallEntry>,
     chosen_model: Option<String>,
 }
@@ -93,7 +94,7 @@ impl AgentChat {
         let tool_els: Vec<Element<'_, AgentChatMessage>> = self
             .tool_call_entries
             .iter()
-            .map(|entry| entry.view())
+            .map(|entry| entry.view().map(AgentChatMessage::ToolMessage))
             .collect();
 
         let all: Vec<Element<'_, AgentChatMessage>> = msg_els.into_iter().chain(tool_els).collect();
@@ -212,9 +213,7 @@ impl AgentChat {
 
     pub fn view(&self) -> Element<'_, AgentChatMessage> {
         let layout = column![
-            container(text("AI Chat").size(14))
-                .height(30)
-                .padding([4.0, 8.0]),
+            container(self.view_header()).height(30).padding([4.0, 8.0]),
             rule::horizontal(1.0),
             self.messages_view(),
             self.error_view(),
@@ -226,6 +225,14 @@ impl AgentChat {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+
+    fn view_header(&self) -> Element<'_, AgentChatMessage> {
+        row![
+            text("AI Chat").size(14),
+            button("Load last conversation").on_press(AgentChatMessage::LoadChat)
+        ]
+        .into()
     }
 
     pub fn update(&mut self, message: AgentChatMessage) -> Task<AgentChatMessage> {
@@ -397,50 +404,52 @@ impl AgentChat {
 
                 task
             }
-            AgentChatMessage::ApproveToolCall(call_id) => {
-                info!("ApproveToolCall: call_id={}", call_id);
-                if let Some(entry) = self
-                    .tool_call_entries
-                    .iter_mut()
-                    .find(|e| e.call_id == call_id)
-                {
-                    entry.status = ToolCallStatus::Running;
-                    let tool_name = entry.tool_name.clone();
-                    let args = entry.args.clone();
-                    let tm = self.tool_manager.clone();
-                    info!(
-                        "ApproveToolCall: executing {} (call_id={})",
-                        tool_name, call_id
-                    );
-                    Task::perform(
-                        async move { tm.execute(&tool_name, &args).await },
-                        move |result| AgentChatMessage::ToolExecutionResult {
-                            call_id,
-                            result: result.map_err(|e| e.0),
-                        },
-                    )
-                } else {
-                    info!("ApproveToolCall: call_id={} NOT FOUND in entries", call_id);
-                    Task::none()
+            AgentChatMessage::ToolMessage(msg) => match msg {
+                tool_call_entry::Message::ApproveToolCall(call_id) => {
+                    info!("ApproveToolCall: call_id={}", call_id);
+                    if let Some(entry) = self
+                        .tool_call_entries
+                        .iter_mut()
+                        .find(|e| e.call_id == call_id)
+                    {
+                        entry.approve();
+                        let tool_name = entry.tool_name.clone();
+                        let args = entry.args.clone();
+                        let tm = self.tool_manager.clone();
+                        info!(
+                            "ApproveToolCall: executing {} (call_id={})",
+                            tool_name, call_id
+                        );
+                        Task::perform(
+                            async move { tm.execute(&tool_name, &args).await },
+                            move |result| AgentChatMessage::ToolExecutionResult {
+                                call_id,
+                                result: result.map_err(|e| e.0),
+                            },
+                        )
+                    } else {
+                        info!("ApproveToolCall: call_id={} NOT FOUND in entries", call_id);
+                        Task::none()
+                    }
                 }
-            }
-            AgentChatMessage::RejectToolCall(call_id) => {
-                info!("RejectToolCall: call_id={}", call_id);
-                if let Some(entry) = self
-                    .tool_call_entries
-                    .iter_mut()
-                    .find(|e| e.call_id == call_id)
-                {
-                    entry.status = ToolCallStatus::Rejected;
-                    info!(
-                        "RejectToolCall: rejected {} (call_id={})",
-                        entry.tool_name, call_id
-                    );
-                } else {
-                    info!("RejectToolCall: call_id={} NOT FOUND in entries", call_id);
+                tool_call_entry::Message::RejectToolCall(call_id) => {
+                    info!("RejectToolCall: call_id={}", call_id);
+                    if let Some(entry) = self
+                        .tool_call_entries
+                        .iter_mut()
+                        .find(|e| e.call_id == call_id)
+                    {
+                        entry.reject();
+                        info!(
+                            "RejectToolCall: rejected {} (call_id={})",
+                            entry.tool_name, call_id
+                        );
+                    } else {
+                        info!("RejectToolCall: call_id={} NOT FOUND in entries", call_id);
+                    }
+                    self.maybe_re_prompt()
                 }
-                self.maybe_re_prompt()
-            }
+            },
             AgentChatMessage::ToolExecutionResult { call_id, result } => {
                 match &result {
                     Ok(data) => info!(
@@ -503,6 +512,12 @@ impl AgentChat {
                 if !self.streaming() {
                     self.messages.clear();
                     self.error = None;
+                }
+                Task::none()
+            }
+            AgentChatMessage::LoadChat => {
+                if let Ok(msgs) = load_agent_session() {
+                    self.messages = msgs;
                 }
                 Task::none()
             }

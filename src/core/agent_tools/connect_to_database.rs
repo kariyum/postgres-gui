@@ -1,8 +1,8 @@
+use iced::futures::channel::mpsc::Sender;
 use rig_core::completion::ToolDefinition;
 use rig_core::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use iced::futures::channel::mpsc::Sender;
 
 use super::{DatabaseKeeperMessage, ToolError};
 use crate::core::database_keeper::connect_database;
@@ -42,7 +42,7 @@ impl Tool for ConnectToDatabase {
                 "properties": {
                     "database_name": {
                         "type": "string",
-                        "description": "The name or id of the saved connection to connect to"
+                        "description": "The name of the database or id of the configuration to connect to"
                     }
                 },
                 "required": ["database_name"]
