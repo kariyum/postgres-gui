@@ -1,8 +1,8 @@
 use anyhow::Context;
 use iced::border::Radius;
 use iced::widget::space::horizontal;
-use iced::widget::{button, column, container, row, space, text};
-use iced::{Background, Border, Color, Element, Length, Theme};
+use iced::widget::{button, column, container, row, space, text, text_editor};
+use iced::{Background, Border, Color, Element, Length, Shadow, Theme, font};
 use serde::{Deserialize, Serialize};
 
 use crate::core::agent_tools::connect_to_database::ConnectToDatabaseArgs;
@@ -40,6 +40,8 @@ pub enum ToolArgs {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolDetails {
     pub args: ToolArgs,
+    #[serde(skip)]
+    content: Option<text_editor::Content>,
 }
 
 impl ToolDetails {
@@ -48,7 +50,20 @@ impl ToolDetails {
         if let Err(ref err) = args {
             tracing::warn!("ToolArgs construction failed with {err}")
         }
-        Ok(ToolDetails { args: args? })
+        let content: Option<text_editor::Content> = if let Ok(ref args) = args {
+            match args {
+                ToolArgs::ExecuteSQL(sql) => {
+                    Some(text_editor::Content::with_text(sql.sql.as_str()))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        Ok(ToolDetails {
+            args: args?,
+            content,
+        })
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -57,14 +72,27 @@ impl ToolDetails {
                 text(format!("Database name: {}", args.database_name)).into()
             }
             ToolArgs::DescribeTable(ref args) => {
-                text(format!("Describe Table {}.{}", args.schema, args.table)).into()
+                text(format!("Table {}.{}", args.schema, args.table)).into()
             }
-            ToolArgs::ExecuteSQL(ref args) => column![text(args.sql.as_str())].into(),
+            ToolArgs::ExecuteSQL(ref args) => {
+                if let Some(ref content) = self.content {
+                    tracing::info!("RENDERING AN EDITOR");
+                    text_editor(content)
+                        .highlight("sql", iced::highlighter::Theme::Base16Eighties)
+                        .font(iced::Font::MONOSPACE)
+                        .size(14)
+                        .into()
+                } else {
+                    text(args.sql.as_str()).into()
+                }
+            }
             ToolArgs::ExplainQuery(ref args) => text(format!("{}", args.sql)).into(),
             ToolArgs::ListConnections(_) => space().into(),
-            ToolArgs::ListSchemas(ref args) => text(format!("{}", args.database_name)).into(),
-            ToolArgs::ListTables(ref args) => text(format!("{}", args.schema)).into(),
-            ToolArgs::ShowTableStats(ref args) => text(format!("{}", args.table)).into(),
+            ToolArgs::ListSchemas(ref args) => {
+                text(format!("Database name: {}", args.database_name)).into()
+            }
+            ToolArgs::ListTables(ref args) => text(format!("Schema: {}", args.schema)).into(),
+            ToolArgs::ShowTableStats(ref args) => text(format!("Table: {}", args.table)).into(),
         }
     }
 }
@@ -114,15 +142,11 @@ impl ToolCallEntry {
         self.status = ToolCallStatus::Rejected;
     }
 
-    pub fn needs_approval(&self) -> bool {
-        matches!(self.status, ToolCallStatus::PendingApproval)
-    }
-
     pub fn status_label(&self) -> &'static str {
         match &self.status {
             ToolCallStatus::PendingApproval => "Needs approval",
             ToolCallStatus::Running => "Running...",
-            ToolCallStatus::Completed => "Done",
+            ToolCallStatus::Completed => "",
             ToolCallStatus::Failed => "Failed",
             ToolCallStatus::Rejected => "Rejected",
         }
@@ -130,41 +154,54 @@ impl ToolCallEntry {
 
     pub fn view(&self) -> Element<'_, Message> {
         let body: Element<'_, Message> = column![
-            row![
-                text(self.status_label()),
-                text(format!(
-                    "{}",
-                    self.tool_name.replace("_", " ").to_uppercase()
-                ))
+            column![
+                text("Tool Call").font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
+                text(format!("{}", self.tool_name.replace("_", " "))),
             ]
-            .spacing(8),
-            container(self.view_args()).padding([4, 6]),
+            .spacing(0),
+            self.view_args(),
             self.view_error(),
             row![horizontal(), self.view_actions()],
         ]
-        .spacing(8)
+        .spacing(0)
         .into();
 
         container(body)
-            .padding(8)
-            .width(Length::Fixed(500.0))
-            .style(container::primary)
+            .padding([4, 8])
+            .width(Length::Fill)
+            .style(|_theme| {
+                let default = if matches!(self.status, ToolCallStatus::Failed) {
+                    container::warning
+                } else if matches!(self.status, ToolCallStatus::Completed) {
+                    container::success
+                } else {
+                    container::secondary
+                };
+                container::Style {
+                    border: Border::default().rounded(0),
+                    ..default(_theme)
+                }
+            })
             .into()
     }
 
     fn view_args(&self) -> Element<'_, Message> {
-        match self.tool_details {
+        if self.args.is_empty() {
+            return space().into();
+        }
+        let body: Element<Message> = match self.tool_details {
             Ok(ref tool_details) => tool_details.view().into(),
             Err(_) => text(self.args.as_str()).size(11).into(),
-        }
+        };
+        container(body).padding(0).into()
     }
 
     fn view_error(&self) -> Element<'_, Message> {
         match self.error {
-            Some(ref err) => text(format!("Error: {err}"))
-                .size(11)
-                .style(text::danger)
-                .into(),
+            Some(ref err) => text(format!("{err}")).style(text::danger).into(),
             None => space().into(),
         }
     }

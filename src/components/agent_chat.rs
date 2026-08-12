@@ -99,7 +99,7 @@ impl AgentChat {
 
         let all: Vec<Element<'_, AgentChatMessage>> = msg_els.into_iter().chain(tool_els).collect();
 
-        scrollable(column(all))
+        scrollable(column(all).spacing(8))
             .id("chat_messages")
             .on_scroll(AgentChatMessage::UserScrolled)
             .height(Length::Fill)
