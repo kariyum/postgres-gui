@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use rig_core::client::{CompletionClient, ModelListingClient};
 use rig_core::completion::message::{AssistantContent, UserContent};
 use rig_core::completion::{CompletionModel, CompletionRequest, Message};
+use rig_core::http_client::{HeaderMap, HeaderValue};
 use rig_core::providers::openai;
 use rig_core::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
 use rig_core::{OneOrMany, model::ModelList};
@@ -14,6 +15,14 @@ use tracing::info;
 
 use crate::components::chat_msg::Role;
 use crate::core::{agent_tools::Tools, configured_provider::ConfiguredProvider};
+
+const USER_AGENT: &str = "opencode/1.18.16";
+
+fn user_agent_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
+    headers
+}
 
 pub async fn list_opencode_models(
     api_key: String,
@@ -27,6 +36,7 @@ pub async fn list_opencode_models(
 
     let built_client = client
         .api_key(api_key)
+        .http_headers(user_agent_headers())
         .build()
         .context("Failed to build OpenAI client")?;
 
@@ -148,6 +158,7 @@ pub async fn prompt(
 
     let built_client = client
         .api_key(configured_provider.api_key)
+        .http_headers(user_agent_headers())
         .build()
         .context("Failed to build OpenAI client")?
         .completions_api();
@@ -162,10 +173,7 @@ pub async fn prompt(
         messages.len()
     );
 
-    let tool_definitions = tool_manager
-        .definitions()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to get tool definitions: {e}"))?;
+    let tool_definitions = tool_manager.definitions();
 
     let preamble = build_preamble();
 
@@ -180,6 +188,7 @@ pub async fn prompt(
         tool_choice: None,
         additional_params: None,
         output_schema: None,
+        record_telemetry_content: false,
     };
 
     info!("prompt: calling completion_model.stream()...");
@@ -223,6 +232,7 @@ pub async fn prompt(
                     tracing::info!("Final response {}", final_response);
                     Some(Ok(ChatResponseChunk::Done))
                 }
+                StreamedAssistantContent::Unknown(_) => None,
             },
             Err(e) => Some(Err(e.into())),
         }

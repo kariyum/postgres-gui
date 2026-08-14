@@ -14,7 +14,7 @@ iced_aw = { git = "https://github.com/tsuza/iced_aw", rev = "a9301708a4d008dc17f
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
 anyhow = "1.0.103"
-rig-core = "0.39.0"
+rig-core = "0.41.0"
 dirs = "6.0.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

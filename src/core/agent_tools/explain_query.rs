@@ -1,5 +1,4 @@
-use rig_core::completion::ToolDefinition;
-use rig_core::tool::Tool;
+use rig_core::tool::PortableTool;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -17,43 +16,50 @@ pub struct ExplainQuery {
     db_actor: Sender<DatabaseKeeperMessage>,
 }
 
+impl Clone for ExplainQuery {
+    fn clone(&self) -> Self {
+        Self {
+            db_actor: self.db_actor.clone(),
+        }
+    }
+}
+
 impl ExplainQuery {
     pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
 
-impl Tool for ExplainQuery {
+impl PortableTool for ExplainQuery {
     const NAME: &'static str = "explain_query";
 
     type Error = ToolError;
     type Args = ExplainQueryArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name(),
-            description:
-                "Get the query execution plan for a SQL statement using EXPLAIN (FORMAT JSON). \
+    fn description(&self) -> String {
+        "Get the query execution plan for a SQL statement using EXPLAIN (FORMAT JSON). \
                           The database_name must match one of the available connected databases. \
                           Returns the plan as a JSON object. \
                           Note: This does not execute the query (no ANALYZE)."
-                    .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "database_name": {
-                        "type": "string",
-                        "description": "The name of the database to explain the query on"
-                    },
-                    "sql": {
-                        "type": "string",
-                        "description": "The SQL query to explain"
-                    }
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "The name of the database to explain the query on"
                 },
-                "required": ["database_name", "sql"]
-            }),
-        }
+                "sql": {
+                    "type": "string",
+                    "description": "The SQL query to explain"
+                }
+            },
+            "required": ["database_name", "sql"]
+        })
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {

@@ -1,5 +1,4 @@
-use rig_core::completion::ToolDefinition;
-use rig_core::tool::Tool;
+use rig_core::tool::PortableTool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
@@ -18,47 +17,54 @@ pub struct ShowTableStats {
     db_actor: Sender<DatabaseKeeperMessage>,
 }
 
+impl Clone for ShowTableStats {
+    fn clone(&self) -> Self {
+        Self {
+            db_actor: self.db_actor.clone(),
+        }
+    }
+}
+
 impl ShowTableStats {
     pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
 
-impl Tool for ShowTableStats {
+impl PortableTool for ShowTableStats {
     const NAME: &'static str = "show_table_stats";
 
     type Error = ToolError;
     type Args = ShowTableStatsArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name(),
-            description:
-                "Get table statistics including estimated row count, total size, table size, \
+    fn description(&self) -> String {
+        "Get table statistics including estimated row count, total size, table size, \
                           and index size. The database_name must match one of the available connected databases. \
                           Returns a JSON object with byte sizes and row estimate. \
                           Sizes are returned in bytes and as human-readable strings."
-                    .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "database_name": {
-                        "type": "string",
-                        "description": "The name of the database containing the table"
-                    },
-                    "schema": {
-                        "type": "string",
-                        "description": "The schema containing the table"
-                    },
-                    "table": {
-                        "type": "string",
-                        "description": "The table name to get stats for"
-                    }
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "The name of the database containing the table"
                 },
-                "required": ["database_name", "schema", "table"]
-            }),
-        }
+                "schema": {
+                    "type": "string",
+                    "description": "The schema containing the table"
+                },
+                "table": {
+                    "type": "string",
+                    "description": "The table name to get stats for"
+                }
+            },
+            "required": ["database_name", "schema", "table"]
+        })
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {

@@ -15,7 +15,10 @@ use sqlx::Row;
 use tracing::info;
 
 use rig_core::completion::ToolDefinition;
-use rig_core::tool::ToolSet;
+use rig_core::tool::{
+    IntoToolOutput, PortableDynamicTool, PortableTool, ToolExecutionError,
+    portable_tool_definition,
+};
 
 pub use connect_to_database::ConnectToDatabase;
 pub use describe_table::DescribeTable;
@@ -110,7 +113,7 @@ pub fn cell_to_value(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -
 
 #[derive(Clone)]
 pub struct Tools {
-    toolset: std::sync::Arc<ToolSet>,
+    toolset: std::sync::Arc<Vec<PortableDynamicTool>>,
 }
 
 impl std::fmt::Debug for Tools {
@@ -121,26 +124,24 @@ impl std::fmt::Debug for Tools {
 
 impl Tools {
     pub fn new(sender: Sender<DatabaseKeeperMessage>) -> Self {
-        let mut toolset = ToolSet::default();
-        toolset.add_tool(ExecuteSql::new(sender.clone()));
-        toolset.add_tool(ListSchemas::new(sender.clone()));
-        toolset.add_tool(ListTables::new(sender.clone()));
-        toolset.add_tool(DescribeTable::new(sender.clone()));
-        toolset.add_tool(ExplainQuery::new(sender.clone()));
-        toolset.add_tool(ShowTableStats::new(sender.clone()));
-        toolset.add_tool(ListConnections::new(sender.clone()));
-        toolset.add_tool(ConnectToDatabase::new(sender.clone()));
+        let toolset = vec![
+            into_dynamic(ExecuteSql::new(sender.clone())),
+            into_dynamic(ListSchemas::new(sender.clone())),
+            into_dynamic(ListTables::new(sender.clone())),
+            into_dynamic(DescribeTable::new(sender.clone())),
+            into_dynamic(ExplainQuery::new(sender.clone())),
+            into_dynamic(ShowTableStats::new(sender.clone())),
+            into_dynamic(ListConnections::new(sender.clone())),
+            into_dynamic(ConnectToDatabase::new(sender.clone())),
+        ];
 
         Self {
             toolset: std::sync::Arc::new(toolset),
         }
     }
 
-    pub async fn definitions(&self) -> Result<Vec<ToolDefinition>, ToolError> {
-        self.toolset
-            .get_tool_definitions()
-            .await
-            .map_err(|e| ToolError(e.to_string()))
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        self.toolset.iter().map(|tool| tool.definition()).collect()
     }
 
     pub async fn execute(&self, tool_name: &str, args_json: &str) -> Result<String, ToolError> {
@@ -148,15 +149,44 @@ impl Tools {
             "execute({tool_name}) starting, args_len={}",
             args_json.len()
         );
-        let result = self
+        let tool = self
             .toolset
-            .call(tool_name, args_json.to_string())
+            .iter()
+            .find(|tool| tool.name() == tool_name)
+            .ok_or_else(|| ToolError(format!("Tool not found: {tool_name}")))?;
+
+        let args: Value = serde_json::from_str(args_json)
+            .map_err(|e| ToolError(format!("Failed to parse tool arguments: {e}")))?;
+
+        let output = tool
+            .execute(args)
             .await
-            .map_err(|e| ToolError(e.to_string()));
-        match &result {
-            Ok(out) => info!("execute({tool_name}) succeeded, output_len={}", out.len()),
-            Err(e) => info!("execute({tool_name}) failed: {e}"),
-        }
-        result
+            .map_err(|e| ToolError(e.to_string()))?;
+        let rendered = output.render();
+        info!("execute({tool_name}) succeeded, output_len={}", rendered.len());
+        Ok(rendered)
     }
+}
+
+fn into_dynamic<T>(tool: T) -> PortableDynamicTool
+where
+    T: PortableTool + Clone + 'static,
+{
+    let definition = portable_tool_definition(&tool);
+    PortableDynamicTool::new(
+        definition.name,
+        definition.description,
+        definition.parameters,
+        move |args: Value| {
+            let tool = tool.clone();
+            Box::pin(async move {
+                let typed_args: T::Args = serde_json::from_value(args)
+                    .map_err(|e| ToolExecutionError::invalid_args(format!("invalid arguments: {e}")))?;
+                tool.call(typed_args)
+                    .await
+                    .map_err(ToolExecutionError::from_error)?
+                    .into_tool_output()
+            })
+        },
+    )
 }

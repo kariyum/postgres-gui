@@ -1,6 +1,5 @@
 use iced::futures::channel::mpsc::Sender;
-use rig_core::completion::ToolDefinition;
-use rig_core::tool::Tool;
+use rig_core::tool::PortableTool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -16,38 +15,46 @@ pub struct ConnectToDatabase {
     db_actor: Sender<DatabaseKeeperMessage>,
 }
 
+impl Clone for ConnectToDatabase {
+    fn clone(&self) -> Self {
+        Self {
+            db_actor: self.db_actor.clone(),
+        }
+    }
+}
+
 impl ConnectToDatabase {
     pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
 
-impl Tool for ConnectToDatabase {
+impl PortableTool for ConnectToDatabase {
     const NAME: &'static str = "connect_to_database";
 
     type Error = ToolError;
     type Args = ConnectToDatabaseArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name(),
-            description: "Connect to a saved database by its name or id. \
+    fn description(&self) -> String {
+        "Connect to a saved database by its name or id. \
                           Use list_connections first to see available saved connections. \
                           After connecting, the database becomes available for query tools. \
                           Returns a success message with connection details, or an error if the connection fails."
-                .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "database_name": {
-                        "type": "string",
-                        "description": "The name of the database or id of the configuration to connect to"
-                    }
-                },
-                "required": ["database_name"]
-            }),
-        }
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "The name of the database or id of the configuration to connect to"
+                }
+            },
+            "required": ["database_name"]
+        })
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {

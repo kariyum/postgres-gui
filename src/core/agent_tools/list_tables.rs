@@ -1,5 +1,4 @@
-use rig_core::completion::ToolDefinition;
-use rig_core::tool::Tool;
+use rig_core::tool::PortableTool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use iced::futures::channel::mpsc::Sender;
@@ -16,41 +15,49 @@ pub struct ListTables {
     db_actor: Sender<DatabaseKeeperMessage>,
 }
 
+impl Clone for ListTables {
+    fn clone(&self) -> Self {
+        Self {
+            db_actor: self.db_actor.clone(),
+        }
+    }
+}
+
 impl ListTables {
     pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
 
-impl Tool for ListTables {
+impl PortableTool for ListTables {
     const NAME: &'static str = "list_tables";
 
     type Error = ToolError;
     type Args = ListTablesArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name(),
-            description: "List all base tables in a given schema. \
+    fn description(&self) -> String {
+        "List all base tables in a given schema. \
                           The database_name must match one of the available connected databases. \
                           Returns a JSON object with schema name and an array of table names."
-                .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "database_name": {
-                        "type": "string",
-                        "description": "The name of the database to list tables from"
-                    },
-                    "schema": {
-                        "type": "string",
-                        "description": "The schema name to list tables from"
-                    }
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "The name of the database to list tables from"
                 },
-                "required": ["database_name", "schema"]
-            }),
-        }
+                "schema": {
+                    "type": "string",
+                    "description": "The schema name to list tables from"
+                }
+            },
+            "required": ["database_name", "schema"]
+        })
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {

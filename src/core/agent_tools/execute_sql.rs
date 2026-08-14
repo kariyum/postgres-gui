@@ -1,6 +1,5 @@
 use iced::futures::channel::mpsc::Sender;
-use rig_core::completion::ToolDefinition;
-use rig_core::tool::Tool;
+use rig_core::tool::PortableTool;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Column, Row, TypeInfo};
@@ -17,44 +16,52 @@ pub struct ExecuteSql {
     db_actor: Sender<DatabaseKeeperMessage>,
 }
 
+impl Clone for ExecuteSql {
+    fn clone(&self) -> Self {
+        Self {
+            db_actor: self.db_actor.clone(),
+        }
+    }
+}
+
 impl ExecuteSql {
     pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
 
-impl Tool for ExecuteSql {
+impl PortableTool for ExecuteSql {
     const NAME: &'static str = "execute_sql";
 
     type Error = ToolError;
     type Args = ExecuteSqlArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name(),
-            description: "Execute a SQL query against a PostgreSQL database. \
+    fn description(&self) -> String {
+        "Execute a SQL query against a PostgreSQL database. \
                           The database_name must match one of the available connected databases. \
                           Returns results as a JSON object with 'columns' (array of column names), \
                           'rows' (array of arrays), 'rows_affected' count, and a 'truncated' flag. \
                           Results are capped at 50 rows. \
                           Use for SELECT, INSERT, UPDATE, DELETE, DDL, or any arbitrary SQL."
-                .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "database_name": {
-                        "type": "string",
-                        "description": "The name of the database to execute the query on"
-                    },
-                    "sql": {
-                        "type": "string",
-                        "description": "The SQL query to execute"
-                    }
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "The name of the database to execute the query on"
                 },
-                "required": ["database_name", "sql"]
-            }),
-        }
+                "sql": {
+                    "type": "string",
+                    "description": "The SQL query to execute"
+                }
+            },
+            "required": ["database_name", "sql"]
+        })
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {

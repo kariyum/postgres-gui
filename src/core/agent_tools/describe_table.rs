@@ -1,5 +1,4 @@
-use rig_core::completion::ToolDefinition;
-use rig_core::tool::Tool;
+use rig_core::tool::PortableTool;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -18,46 +17,54 @@ pub struct DescribeTable {
     db_actor: Sender<DatabaseKeeperMessage>,
 }
 
+impl Clone for DescribeTable {
+    fn clone(&self) -> Self {
+        Self {
+            db_actor: self.db_actor.clone(),
+        }
+    }
+}
+
 impl DescribeTable {
     pub fn new(db_actor: Sender<DatabaseKeeperMessage>) -> Self {
         Self { db_actor }
     }
 }
 
-impl Tool for DescribeTable {
+impl PortableTool for DescribeTable {
     const NAME: &'static str = "describe_table";
 
     type Error = ToolError;
     type Args = DescribeTableArgs;
     type Output = String;
 
-    async fn definition(&self, _prompt: String) -> ToolDefinition {
-        ToolDefinition {
-            name: self.name(),
-            description: "Describe a table's columns, types, nullability, defaults, primary key, and indexes. \
+    fn description(&self) -> String {
+        "Describe a table's columns, types, nullability, defaults, primary key, and indexes. \
                           The database_name must match one of the available connected databases. \
                           Returns a JSON object with 'columns' (array of column details), \
                           'primary_key' (array of PK column names), and 'indexes' (array of index definitions)."
-                .to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "database_name": {
-                        "type": "string",
-                        "description": "The name of the database containing the table"
-                    },
-                    "schema": {
-                        "type": "string",
-                        "description": "The schema containing the table"
-                    },
-                    "table": {
-                        "type": "string",
-                        "description": "The table name to describe"
-                    }
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "database_name": {
+                    "type": "string",
+                    "description": "The name of the database containing the table"
                 },
-                "required": ["database_name", "schema", "table"]
-            }),
-        }
+                "schema": {
+                    "type": "string",
+                    "description": "The schema containing the table"
+                },
+                "table": {
+                    "type": "string",
+                    "description": "The table name to describe"
+                }
+            },
+            "required": ["database_name", "schema", "table"]
+        })
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
