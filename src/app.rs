@@ -1,15 +1,15 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use iced::futures::SinkExt;
+use iced::futures::channel::mpsc::Sender;
 use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{
     Column, button, column, container, mouse_area, row, rule, scrollable, svg, text,
 };
-use iced::{Color, Element, Length, Point, Task, Theme, alignment, border};
+use iced::{Border, Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
-use iced::futures::SinkExt;
-use iced::futures::channel::mpsc::Sender;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -125,10 +125,10 @@ impl App {
             Message::AddConnection => Task::done(Message::CloseMenu)
                 .chain(Task::done(Message::DialogMessage(DialogMessage::OpenNew))),
             Message::ConfigLoaded(config) => {
+                info!("Loaded config {:?}", config);
                 self.app_config = config.clone();
                 self.zoom_multiplier = config.zoom_multiplier;
                 self.agent_config = config.agent_config.clone();
-                info!("Loaded config {:?}", config);
                 let tx_opt = self.database_keeper_actor_tx.clone();
                 Task::batch([
                     Task::done(Message::Settings(SettingsMessage::AgentConfig(
@@ -364,12 +364,12 @@ impl App {
                     }
                     let tx_opt = self.database_keeper_actor_tx.clone();
                     Task::batch([
-                    if let Some(mut tx) = tx_opt {
-                        Task::perform(
-                            async move {
-                                tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                    database_keeper::ConnectionAction::Delete { config },
-                                ))
+                        if let Some(mut tx) = tx_opt {
+                            Task::perform(
+                                async move {
+                                    tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                        database_keeper::ConnectionAction::Delete { config },
+                                    ))
                                     .await
                                     .context("send config to database keeper")
                                 },
@@ -400,13 +400,13 @@ impl App {
                     self.app_config.connections.push(config.clone());
                 };
                 let tx_opt = self.database_keeper_actor_tx.clone();
-                    Task::batch([
-                        if let Some(mut tx) = tx_opt {
-                            Task::perform(
-                                async move {
-                                    tx.send(DatabaseKeeperMessage::ConnectionAction(
-                                        database_keeper::ConnectionAction::Add { config },
-                                    ))
+                Task::batch([
+                    if let Some(mut tx) = tx_opt {
+                        Task::perform(
+                            async move {
+                                tx.send(DatabaseKeeperMessage::ConnectionAction(
+                                    database_keeper::ConnectionAction::Add { config },
+                                ))
                                 .await
                                 .context("send config to database keeper")
                             },
@@ -434,7 +434,8 @@ impl App {
     }
 
     fn save_config(&self) -> Task<Message> {
-        let config = self.app_config.clone();
+        let mut config = self.app_config.clone();
+        config.agent_config = self.agent_config.clone();
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || config_loader::save_config(&config))
@@ -787,6 +788,7 @@ impl App {
             self.agent_config.opencode_config.as_ref(),
         ]
         .into_iter()
+        .map(|maybe_provider| maybe_provider.filter(|provider| !provider.api_key.is_empty()))
         .flatten()
         .collect();
 
@@ -795,16 +797,9 @@ impl App {
             .map(|provider| {
                 button(text(provider.base_provider.to_string()).size(13))
                     .on_press(Message::AgentProviderSelected((*provider).clone()))
-                    .padding([2, 4])
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style {
-                        border: iced::Border::default().rounded(4),
-                        background: match _status {
-                            button::Status::Active => {
-                                Some(iced::Background::Color(Color::TRANSPARENT))
-                            }
-                            _ => None,
-                        },
+                        border: Border::default().rounded(0),
                         ..button::subtle(_theme, _status)
                     })
                     .into()
@@ -812,16 +807,9 @@ impl App {
             .collect();
 
         let menu_content = if buttons.is_empty() {
-            container(
-                text("No providers configured")
-                    .size(13)
-                    .style(|_theme: &Theme| text::Style {
-                        color: Some(Color::from_rgba(0.6, 0.6, 0.6, 1.0)),
-                    }),
-            )
-            .padding([6, 12])
+            container(text("No providers configured").size(13)).padding([6, 12])
         } else {
-            container(column(buttons).spacing(4)).padding([2, 2])
+            container(column(buttons).spacing(0)).padding(0)
         };
 
         menu_content

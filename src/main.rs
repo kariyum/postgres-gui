@@ -5,6 +5,7 @@ mod db;
 mod theme;
 mod types;
 mod ui;
+mod widgets;
 
 use iced::Size;
 use tracing_subscriber::EnvFilter;

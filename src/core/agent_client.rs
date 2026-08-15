@@ -217,7 +217,14 @@ pub async fn prompt(
                         args,
                     }))
                 }
-                StreamedAssistantContent::ToolCallDelta { .. } => None,
+                StreamedAssistantContent::ToolCallDelta {
+                    id,
+                    internal_call_id,
+                    content,
+                } => {
+                    tracing::info!("ToolCallDelta {id} {internal_call_id} {:?}", content);
+                    None
+                }
                 StreamedAssistantContent::Reasoning(reasoning) => {
                     Some(Ok(ChatResponseChunk::Message(
                         ChatResponseMessage::Thinking(reasoning.display_text()),

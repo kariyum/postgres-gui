@@ -140,9 +140,6 @@ impl ProviderConfig {
     }
 
     pub fn updated_provider(&self) -> Option<ConfiguredProvider> {
-        if self.form.api_key.value.is_empty() {
-            return None;
-        }
         match &self.provider {
             Provider::OpenCode(open_code) => Some(ConfiguredProvider {
                 api_key: self.form.api_key.value.clone(),

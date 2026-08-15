@@ -185,20 +185,16 @@ impl SettingsDialog {
                 self.visible = false;
                 Action::None
             }
-            SettingsMessage::OpenCodeConfigMessage(msg) => {
-                Action::Run(
-                    self.opencode_config
-                        .update(msg)
-                        .map(SettingsMessage::OpenCodeConfigMessage),
-                )
-            }
-            SettingsMessage::AnthropicConfigMessage(msg) => {
-                Action::Run(
-                    self.anthropic_config
-                        .update(msg)
-                        .map(SettingsMessage::AnthropicConfigMessage),
-                )
-            }
+            SettingsMessage::OpenCodeConfigMessage(msg) => Action::Run(
+                self.opencode_config
+                    .update(msg)
+                    .map(SettingsMessage::OpenCodeConfigMessage),
+            ),
+            SettingsMessage::AnthropicConfigMessage(msg) => Action::Run(
+                self.anthropic_config
+                    .update(msg)
+                    .map(SettingsMessage::AnthropicConfigMessage),
+            ),
             SettingsMessage::AgentConfig(agent_config) => {
                 info!("Agent config loaded {:?}", agent_config);
                 let mut tasks: Vec<Task<SettingsMessage>> = Vec::new();

@@ -2,7 +2,7 @@ use anyhow::Context;
 use iced::border::Radius;
 use iced::widget::space::horizontal;
 use iced::widget::{button, column, container, row, space, text, text_editor};
-use iced::{Background, Border, Color, Element, Length, Shadow, Theme, font};
+use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Theme, font};
 use serde::{Deserialize, Serialize};
 
 use crate::core::agent_tools::connect_to_database::ConnectToDatabaseArgs;
@@ -76,11 +76,11 @@ impl ToolDetails {
             }
             ToolArgs::ExecuteSQL(ref args) => {
                 if let Some(ref content) = self.content {
-                    tracing::info!("RENDERING AN EDITOR");
                     text_editor(content)
                         .highlight("sql", iced::highlighter::Theme::Base16Eighties)
                         .font(iced::Font::MONOSPACE)
                         .size(14)
+                        .padding(Padding::default().right(4))
                         .into()
                 } else {
                     text(args.sql.as_str()).into()

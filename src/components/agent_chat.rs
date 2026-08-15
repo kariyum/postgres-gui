@@ -230,7 +230,7 @@ impl AgentChat {
     fn view_header(&self) -> Element<'_, AgentChatMessage> {
         row![
             text("AI Chat").size(14),
-            button("Load last conversation").on_press(AgentChatMessage::LoadChat)
+            // button("Load last conversation").on_press(AgentChatMessage::LoadChat)
         ]
         .into()
     }
@@ -308,13 +308,7 @@ impl AgentChat {
                                 {
                                     content.push_str(&delta);
                                     markdown_content.push_str(&delta);
-                                    info!(
-                                        "chunk Content: delta_len={}, total_len={}",
-                                        delta.len(),
-                                        content.len()
-                                    );
                                 } else {
-                                    info!("chunk Content (new msg): delta_len={}", delta.len());
                                     self.messages
                                         .push(ChatMsg::new_content(Role::Assistant, delta));
                                 }
@@ -329,7 +323,6 @@ impl AgentChat {
                                 {
                                     markdown_content.push_str(&delta);
                                 } else {
-                                    info!("chunk Thinking: delta_len={}", delta.len());
                                     self.messages
                                         .push(ChatMsg::new_content(Role::Thinking, delta));
                                 }

@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -56,6 +56,7 @@ pub fn save_config(config: &AppConfig) -> anyhow::Result<()> {
     let file = File::create(&path).context("Failed to create file")?;
     let writer = BufWriter::new(file);
     serde_json::to_writer_pretty(writer, config).context("Failed to serialize config")?;
+    tracing::info!("written config");
     Ok(())
 }
 

@@ -1,6 +1,5 @@
 use iced::{
-    Element, Length, Theme,
-    widget::{button, column, container, text},
+    Border, Element, Length, Theme, widget::{button, column, container, text},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -112,6 +111,7 @@ fn context_button(
         .on_press(msg)
         .width(Length::Fill)
         .style(|_theme, _status| button::Style {
+            border: Border::default().rounded(0),
             ..button::subtle(_theme, _status)
         })
 }

@@ -1,4 +1,6 @@
 use crate::components::connection_config::ConnectionConfig;
+use crate::db;
+use crate::types::QueryResult;
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
@@ -14,8 +16,11 @@ pub struct EditorConfig {
     panes: pane_grid::State<PaneKind>,
     editor_pane: pane_grid::Pane,
     table_pane: Option<pane_grid::Pane>,
+    pool: Option<sqlx::PgPool>,
+    result: Option<QueryResult>,
+    error: Option<String>,
+    running: bool,
     // database_keeper:
-    // query result
     // query filters
     // query state (idle, running, finished ...)
 }
@@ -33,6 +38,10 @@ pub enum Message {
     EditorAction(text_editor::Action),
     ToolbarActions(ToolbarActions),
     Resized(pane_grid::ResizeEvent),
+    QueryCompleted {
+        pool: Option<sqlx::PgPool>,
+        result: Result<QueryResult, String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +59,10 @@ impl EditorConfig {
             panes: pane,
             editor_pane,
             table_pane: None,
+            pool: None,
+            result: None,
+            error: None,
+            running: false,
         }
     }
 
@@ -69,6 +82,15 @@ impl EditorConfig {
                 self.panes.resize(resize_event.split, resize_event.ratio);
                 Task::none()
             }
+            Message::QueryCompleted { pool, result } => {
+                self.pool = pool;
+                self.running = false;
+                match result {
+                    Ok(query_result) => self.result = Some(query_result),
+                    Err(err) => self.error = Some(err),
+                }
+                Task::none()
+            }
         }
     }
 
@@ -84,7 +106,30 @@ impl EditorConfig {
                         self.table_pane = Some(pane);
                     }
                 }
-                Task::none()
+
+                self.running = true;
+                self.result = None;
+                self.error = None;
+
+                let connection_string = self.config.connection_string();
+                let sql = self.editor.text();
+                let pool = self.pool.clone();
+
+                Task::perform(
+                    async move {
+                        let pool = match pool {
+                            Some(pool) => pool,
+                            None => match db::connect(&connection_string).await {
+                                Ok(pool) => pool,
+                                Err(err) => return (None, Err(err)),
+                            },
+                        };
+
+                        let result = db::execute_query(&pool, &sql).await;
+                        (Some(pool), result)
+                    },
+                    |(pool, result)| Message::QueryCompleted { pool, result },
+                )
             }
         }
     }
@@ -213,9 +258,50 @@ impl EditorConfig {
     }
 
     fn view_table(&self) -> Element<'_, Message> {
-        container(column![rule::horizontal(1), container(text("I'm a table")),])
-            .height(Length::Fill)
+        let content: Element<'_, Message> = match (&self.result, &self.error, self.running) {
+            (Some(result), _, _) if result.columns.is_empty() => container(
+                text(&result.message)
+                    .size(13)
+                    .color(crate::theme::SUCCESS),
+            )
+            .padding(16)
+            .into(),
+            (Some(result), _, _) => {
+                let columns = result
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<Vec<_>>();
+                let rows = result
+                    .rows
+                    .iter()
+                    .map(|row| row.cells.clone())
+                    .collect::<Vec<_>>();
+
+                crate::widgets::table::Table::new(columns, rows).into()
+            }
+            (None, Some(error), _) => {
+                container(text(error).size(13).color(crate::theme::DANGER)).padding(16).into()
+            }
+            (None, None, true) => container(
+                text("Running query...")
+                    .size(13)
+                    .color(crate::theme::TEXT_MUTED),
+            )
+            .padding(16)
+            .into(),
+            (None, None, false) => container(
+                text("Run a query to see results here.")
+                    .size(13)
+                    .color(crate::theme::TEXT_MUTED),
+            )
+            .padding(16)
+            .into(),
+        };
+
+        container(column![rule::horizontal(1), content])
             .width(Length::Fill)
+            .height(Length::Fill)
             .into()
     }
 }
