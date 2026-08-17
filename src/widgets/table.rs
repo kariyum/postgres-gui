@@ -11,8 +11,8 @@ use std::time::Instant;
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::mouse;
 use iced::advanced::renderer;
-use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::text::paragraph::Plain;
+use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::widget::{self, Tree, Widget};
 use iced::advanced::{Renderer, Shell};
 use iced::alignment;
@@ -21,7 +21,7 @@ use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, 
 /// Width of the row-number gutter column.
 const GUTTER_WIDTH: f32 = 48.0;
 /// Width of the scrollbar tracks.
-const SCROLLBAR_WIDTH: f32 = 10.0;
+const SCROLLBAR_WIDTH: f32 = 5.0;
 /// Minimum length of a scrollbar scroller.
 const MIN_SCROLLER: f32 = 24.0;
 
@@ -561,6 +561,7 @@ where
         let gutter_width = if self.gutter { GUTTER_WIDTH } else { 0.0 };
         let row_height = state.row_height;
         let body_top = bounds.y + state.header_height;
+        let body_height = (bounds.height - state.header_height).max(0.0);
 
         let zebra = Color::from_rgba(1.0, 1.0, 1.0, 0.03);
         let gutter_bg = Color::from_rgba(1.0, 1.0, 1.0, 0.06);
@@ -603,7 +604,7 @@ where
                 return;
             };
 
-            // Gutter separator + vertical column separators, spanning the whole height.
+            // Gutter separator, spanning the whole height (sticky).
             if self.gutter {
                 fill_quad(
                     renderer,
@@ -612,12 +613,7 @@ where
                 );
             }
 
-            for index in first_col..=last_col {
-                let cx = bounds.x + xs[index] - scroll_x;
-                fill_quad(renderer, quad_rect(bounds, cx, 1.0), separator);
-            }
-
-            // Header row (sticky vertically, scrolls horizontally).
+            // Header gutter cell (sticky).
             if self.gutter {
                 draw_cell(
                     &mut cache,
@@ -639,66 +635,128 @@ where
                 );
             }
 
-            for index in first_col..=last_col {
-                let cx = bounds.x + xs[index] - scroll_x;
+            // Everything that scrolls horizontally — column separators, header
+            // columns, and body cells — is clipped to the right of the sticky
+            // gutter, so it can never paint over it.
+            let columns_rect = Rectangle {
+                x: bounds.x + gutter_width,
+                y: bounds.y,
+                width: (bounds.width - gutter_width).max(0.0),
+                height: bounds.height,
+            };
 
-                draw_cell(
-                    &mut cache,
-                    renderer,
-                    self,
-                    (HEADER, index),
-                    &self.columns[index],
-                    content_rect(
-                        Rectangle {
-                            x: cx,
-                            y: bounds.y,
-                            width: state.column_widths[index],
-                            height: state.header_height,
-                        },
-                        self,
-                    ),
-                    text_color,
-                    bounds,
-                );
-            }
+            renderer.with_layer(columns_rect, |renderer| {
+                for index in first_col..=last_col {
+                    let cx = bounds.x + xs[index] - scroll_x;
+                    fill_quad(renderer, quad_rect(bounds, cx, 1.0), separator);
+                }
 
-            if self.rows.is_empty() {
-                return;
-            }
+                for index in first_col..=last_col {
+                    let cx = bounds.x + xs[index] - scroll_x;
 
-            // Horizontal separator under the header.
-            fill_quad(
-                renderer,
-                Rectangle {
-                    x: bounds.x,
-                    y: bounds.y + state.header_height - 1.0,
-                    width: bounds.width,
-                    height: 1.0,
-                },
-                separator,
-            );
-
-            // Body rows (visually culled to the viewport).
-            let body_height = (bounds.height - state.header_height).max(0.0);
-            let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
-
-            for row_index in rows {
-                let y = body_top + row_index as f32 * row_height - scroll_y;
-
-                if row_index % 2 == 1 {
-                    fill_quad(
+                    draw_cell(
+                        &mut cache,
                         renderer,
-                        Rectangle {
-                            x: bounds.x,
-                            y,
-                            width: bounds.width,
-                            height: row_height,
-                        },
-                        zebra,
+                        self,
+                        (HEADER, index),
+                        &self.columns[index],
+                        content_rect(
+                            Rectangle {
+                                x: cx,
+                                y: bounds.y,
+                                width: state.column_widths[index],
+                                height: state.header_height,
+                            },
+                            self,
+                        ),
+                        text_color,
+                        bounds,
                     );
                 }
 
-                if self.gutter {
+                if self.rows.is_empty() {
+                    return;
+                }
+
+                // Body rows (visually culled to the viewport, clipped below
+                // the header so scrolled content never paints over it).
+                let body_rect = Rectangle {
+                    x: bounds.x,
+                    y: body_top,
+                    width: bounds.width,
+                    height: body_height,
+                };
+                let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
+
+                renderer.with_layer(body_rect, |renderer| {
+                    for row_index in rows {
+                        let y = body_top + row_index as f32 * row_height - scroll_y;
+
+                        if row_index % 2 == 1 {
+                            fill_quad(
+                                renderer,
+                                Rectangle {
+                                    x: bounds.x,
+                                    y,
+                                    width: bounds.width,
+                                    height: row_height,
+                                },
+                                zebra,
+                            );
+                        }
+
+                        let row = &self.rows[row_index];
+
+                        for index in first_col..=last_col {
+                            let cell = row.get(index).map(String::as_str).unwrap_or("");
+                            let color = if cell == "NULL" { muted } else { text_color };
+
+                            draw_cell(
+                                &mut cache,
+                                renderer,
+                                self,
+                                (row_index, index),
+                                cell,
+                                content_rect(
+                                    Rectangle {
+                                        x: bounds.x + xs[index] - scroll_x,
+                                        y,
+                                        width: state.column_widths[index],
+                                        height: row_height,
+                                    },
+                                    self,
+                                ),
+                                color,
+                                bounds,
+                            );
+                        }
+                    }
+                });
+            });
+
+            // Under-header separator, spanning the full width (also under the
+            // gutter), drawn after the columns layer.
+            if !self.rows.is_empty() {
+                fill_quad(
+                    renderer,
+                    Rectangle {
+                        x: bounds.x,
+                        y: bounds.y + state.header_height - 1.0,
+                        width: bounds.width,
+                        height: 1.0,
+                    },
+                    separator,
+                );
+            }
+
+            // Sticky gutter cells are drawn last so they always sit on top of
+            // the clipped columns at the boundary.
+            if self.gutter {
+                let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
+
+                for row_index in rows {
+                    let y = body_top + row_index as f32 * row_height - scroll_y;
+
                     fill_quad(
                         renderer,
                         Rectangle {
@@ -729,32 +787,6 @@ where
                         bounds,
                     );
                 }
-
-                let row = &self.rows[row_index];
-
-                for index in first_col..=last_col {
-                    let cell = row.get(index).map(String::as_str).unwrap_or("");
-                    let color = if cell == "NULL" { muted } else { text_color };
-
-                    draw_cell(
-                        &mut cache,
-                        renderer,
-                        self,
-                        (row_index, index),
-                        cell,
-                        content_rect(
-                            Rectangle {
-                                x: bounds.x + xs[index] - scroll_x,
-                                y,
-                                width: state.column_widths[index],
-                                height: row_height,
-                            },
-                            self,
-                        ),
-                        color,
-                        bounds,
-                    );
-                }
             }
 
             // Drop paragraphs that scrolled out of (a margin around) the
@@ -765,11 +797,12 @@ where
             let first_row = (scroll_y / row_height).floor().max(0.0) as usize;
             let last_row = ((scroll_y + body_height) / row_height).ceil() as usize;
             let row_span = first_row.checked_sub(row_margin).unwrap_or(0)..last_row + row_margin;
-            let col_span =
-                first_col.checked_sub(col_margin).unwrap_or(0)..last_col + col_margin;
+            let col_span = first_col.checked_sub(col_margin).unwrap_or(0)..last_col + col_margin;
 
             cache.retain(|&(row, col), _| {
-                row == HEADER || col == GUTTER || (row_span.contains(&row) && col_span.contains(&col))
+                row == HEADER
+                    || col == GUTTER
+                    || (row_span.contains(&row) && col_span.contains(&col))
             });
 
             // Scrollbars.
