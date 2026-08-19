@@ -194,7 +194,7 @@ fn track(bounds: Rectangle, axis: Axis) -> Rectangle {
 }
 
 fn max_offset_x(state: &State<impl Paragraph>, bounds: Rectangle) -> f32 {
-    (state.content_width - bounds.width).max(0.0)
+    (state.content_width + GUTTER_WIDTH - bounds.width).max(0.0)
 }
 
 fn max_offset_y(state: &State<impl Paragraph>, bounds: Rectangle) -> f32 {
@@ -326,8 +326,7 @@ impl Table {
         }
 
         state.column_widths = widths;
-        state.content_width =
-            if self.gutter { GUTTER_WIDTH } else { 0.0 } + state.column_widths.iter().sum::<f32>();
+        state.content_width = state.column_widths.iter().sum::<f32>();
         state.content_height = state.header_height + self.rows.len() as f32 * state.row_height;
     }
 }
@@ -591,7 +590,7 @@ where
 
             // Column start positions, in content coordinates (the gutter is sticky).
             let mut xs = Vec::with_capacity(state.column_widths.len());
-            let mut x = gutter_width;
+            let mut x = 0.0;
             for &width in &state.column_widths {
                 xs.push(x);
                 x += width;
@@ -604,17 +603,25 @@ where
                 return;
             };
 
-            // Gutter separator, spanning the whole height (sticky).
-            if self.gutter {
+            let gutter_bounds = Rectangle {
+                x: bounds.x,
+                y: bounds.y,
+                width: GUTTER_WIDTH,
+                height: bounds.height,
+            };
+
+            renderer.with_layer(gutter_bounds, |renderer| {
                 fill_quad(
                     renderer,
-                    quad_rect(bounds, bounds.x + gutter_width - 1.0, 1.0),
+                    Rectangle {
+                        x: gutter_bounds.x + GUTTER_WIDTH - 1.0,
+                        y: gutter_bounds.y,
+                        width: 1.0,
+                        height: gutter_bounds.height,
+                    },
                     separator,
                 );
-            }
 
-            // Header gutter cell (sticky).
-            if self.gutter {
                 draw_cell(
                     &mut cache,
                     renderer,
@@ -623,36 +630,81 @@ where
                     "#",
                     content_rect(
                         Rectangle {
-                            x: bounds.x,
-                            y: bounds.y,
+                            x: gutter_bounds.x,
+                            y: gutter_bounds.y,
                             width: gutter_width,
                             height: state.header_height,
                         },
                         self,
                     ),
                     muted,
-                    bounds,
+                    gutter_bounds,
                 );
-            }
+
+                // Sticky gutter cells are drawn last so they always sit on top of
+                // the clipped columns at the boundary.
+                let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
+                let gutter_indices_bounds = Rectangle {
+                    x: gutter_bounds.x,
+                    y: gutter_bounds.y + state.header_height,
+                    width: gutter_bounds.width,
+                    height: gutter_bounds.height - state.header_height,
+                };
+                renderer.with_layer(gutter_indices_bounds, |renderer| {
+                    for row_index in rows {
+                        let y = body_top + row_index as f32 * row_height - scroll_y;
+
+                        fill_quad(
+                            renderer,
+                            Rectangle {
+                                x: gutter_indices_bounds.x,
+                                y,
+                                width: gutter_width,
+                                height: row_height,
+                            },
+                            gutter_bg,
+                        );
+
+                        draw_cell(
+                            &mut cache,
+                            renderer,
+                            self,
+                            (row_index, GUTTER),
+                            &(row_index + 1).to_string(),
+                            content_rect(
+                                Rectangle {
+                                    x: gutter_indices_bounds.x,
+                                    y,
+                                    width: gutter_width,
+                                    height: row_height,
+                                },
+                                self,
+                            ),
+                            muted,
+                            gutter_indices_bounds,
+                        );
+                    }
+                });
+            });
 
             // Everything that scrolls horizontally — column separators, header
             // columns, and body cells — is clipped to the right of the sticky
             // gutter, so it can never paint over it.
-            let columns_rect = Rectangle {
+            let body_bounds = Rectangle {
                 x: bounds.x + gutter_width,
                 y: bounds.y,
                 width: (bounds.width - gutter_width).max(0.0),
                 height: bounds.height,
             };
 
-            renderer.with_layer(columns_rect, |renderer| {
+            renderer.with_layer(body_bounds, |renderer| {
                 for index in first_col..=last_col {
-                    let cx = bounds.x + xs[index] - scroll_x;
-                    fill_quad(renderer, quad_rect(bounds, cx, 1.0), separator);
+                    let cx = body_bounds.x + xs[index] - scroll_x;
+                    fill_quad(renderer, quad_rect(body_bounds, cx, 1.0), separator);
                 }
 
                 for index in first_col..=last_col {
-                    let cx = bounds.x + xs[index] - scroll_x;
+                    let cx = body_bounds.x + xs[index] - scroll_x;
 
                     draw_cell(
                         &mut cache,
@@ -663,14 +715,14 @@ where
                         content_rect(
                             Rectangle {
                                 x: cx,
-                                y: bounds.y,
+                                y: body_bounds.y,
                                 width: state.column_widths[index],
                                 height: state.header_height,
                             },
                             self,
                         ),
                         text_color,
-                        bounds,
+                        body_bounds,
                     );
                 }
 
@@ -680,15 +732,15 @@ where
 
                 // Body rows (visually culled to the viewport, clipped below
                 // the header so scrolled content never paints over it).
-                let body_rect = Rectangle {
-                    x: bounds.x,
-                    y: body_top,
-                    width: bounds.width,
-                    height: body_height,
-                };
                 let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
 
-                renderer.with_layer(body_rect, |renderer| {
+                let rows_body_bounds = Rectangle {
+                    x: body_bounds.x,
+                    y: body_bounds.y + state.header_height,
+                    width: body_bounds.width,
+                    height: body_bounds.height - state.header_height,
+                };
+                renderer.with_layer(rows_body_bounds, |renderer| {
                     for row_index in rows {
                         let y = body_top + row_index as f32 * row_height - scroll_y;
 
@@ -696,9 +748,9 @@ where
                             fill_quad(
                                 renderer,
                                 Rectangle {
-                                    x: bounds.x,
+                                    x: rows_body_bounds.x,
                                     y,
-                                    width: bounds.width,
+                                    width: rows_body_bounds.width,
                                     height: row_height,
                                 },
                                 zebra,
@@ -719,7 +771,7 @@ where
                                 cell,
                                 content_rect(
                                     Rectangle {
-                                        x: bounds.x + xs[index] - scroll_x,
+                                        x: rows_body_bounds.x + xs[index] - scroll_x,
                                         y,
                                         width: state.column_widths[index],
                                         height: row_height,
@@ -727,7 +779,7 @@ where
                                     self,
                                 ),
                                 color,
-                                bounds,
+                                rows_body_bounds,
                             );
                         }
                     }
@@ -747,46 +799,6 @@ where
                     },
                     separator,
                 );
-            }
-
-            // Sticky gutter cells are drawn last so they always sit on top of
-            // the clipped columns at the boundary.
-            if self.gutter {
-                let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
-
-                for row_index in rows {
-                    let y = body_top + row_index as f32 * row_height - scroll_y;
-
-                    fill_quad(
-                        renderer,
-                        Rectangle {
-                            x: bounds.x,
-                            y,
-                            width: gutter_width,
-                            height: row_height,
-                        },
-                        gutter_bg,
-                    );
-
-                    draw_cell(
-                        &mut cache,
-                        renderer,
-                        self,
-                        (row_index, GUTTER),
-                        &(row_index + 1).to_string(),
-                        content_rect(
-                            Rectangle {
-                                x: bounds.x,
-                                y,
-                                width: gutter_width,
-                                height: row_height,
-                            },
-                            self,
-                        ),
-                        muted,
-                        bounds,
-                    );
-                }
             }
 
             // Drop paragraphs that scrolled out of (a margin around) the
