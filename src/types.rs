@@ -4,10 +4,22 @@ pub struct ResultColumn {
     pub name: String,
 }
 
+impl crate::widgets::table::TableColumn for ResultColumn {
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 /// A single row of query results (each cell is a string for display).
 #[derive(Debug, Clone)]
 pub struct ResultRow {
     pub cells: Vec<String>,
+}
+
+impl crate::widgets::table::TableRow for ResultRow {
+    fn cells(&self) -> &[String] {
+        &self.cells
+    }
 }
 
 /// The full result of executing a query.

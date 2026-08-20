@@ -111,6 +111,8 @@ impl DatabaseKeeper {
                 DatabaseKeeperMessage::LoadedConfig { configs } => {
                     info!("UpdateConnections: {} config(s)", configs.len(),);
                     self.configs = configs;
+                    self.pools
+                        .retain(|name, _| self.configs.iter().any(|cfg| cfg.name == *name));
                 }
                 DatabaseKeeperMessage::ConnectionAction(connection_action) => {
                     info!("ConnectionAction: {:?}", connection_action);
@@ -151,7 +153,8 @@ impl DatabaseKeeper {
         match connection_action {
             ConnectionAction::Delete { config } => {
                 if let Some(index) = self.configs.iter().position(|cfg| cfg.id == config.id) {
-                    self.configs.remove(index);
+                    let removed = self.configs.remove(index);
+                    self.pools.remove(&removed.name);
                 }
             }
             ConnectionAction::Add { config } => {

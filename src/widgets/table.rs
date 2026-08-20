@@ -3,6 +3,11 @@
 //!
 //! Cells are drawn directly through the [`text::Renderer`] â€” there are no
 //! child widgets, mirroring how the built-in `Text` widget works.
+//!
+//! The widget borrows its data rather than copying it: column names and rows
+//! are handed in as slices and must outlive the widget. Columns and rows are
+//! exposed through the [`TableColumn`] and [`TableRow`] traits, so any struct
+//! can be displayed.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -25,10 +30,30 @@ const SCROLLBAR_WIDTH: f32 = 5.0;
 /// Minimum length of a scrollbar scroller.
 const MIN_SCROLLER: f32 = 24.0;
 
+/// A column whose header name can be read for display.
+pub trait TableColumn {
+    /// The header text of this column.
+    fn name(&self) -> &str;
+}
+
+/// A row whose display cells can be read.
+pub trait TableRow {
+    /// The display cells of this row.
+    fn cells(&self) -> &[String];
+}
+
 /// A run of the data table widget.
-pub struct Table {
-    columns: Vec<String>,
-    rows: Vec<Vec<String>>,
+///
+/// `Col` is the column type and `Row` the row type; both only need to expose
+/// their displayable data through [`Column`] and [`Row`]. The widget borrows
+/// the data, so `columns` and `rows` must outlive it.
+pub struct Table<'a, Col, Row>
+where
+    Col: TableColumn,
+    Row: TableRow,
+{
+    columns: &'a [Col],
+    rows: &'a [Row],
     gutter: bool,
     font: Font,
     size: f32,
@@ -38,12 +63,16 @@ pub struct Table {
     max_col_width: f32,
 }
 
-impl Table {
-    /// Creates a new [`Table`] with the given column names and cell strings.
+impl<'a, Col, Row> Table<'a, Col, Row>
+where
+    Col: TableColumn,
+    Row: TableRow,
+{
+    /// Creates a new [`Table`] borrowing the given column names and row cells.
     ///
     /// Every row must contain at least `columns.len()` cells; missing cells
     /// render as empty.
-    pub fn new(columns: Vec<String>, rows: Vec<Vec<String>>) -> Self {
+    pub fn new(columns: &'a [Col], rows: &'a [Row]) -> Self {
         Self {
             columns,
             rows,
@@ -86,6 +115,43 @@ impl Table {
         self.padding_y = padding_y;
         self
     }
+
+    fn refresh_measurements<P: Paragraph<Font = iced::Font>>(
+        &self,
+        renderer: &impl text::Renderer<Paragraph = P, Font = iced::Font>,
+        state: &mut State<P>,
+    ) {
+        let hint_factor = renderer.hint_factor();
+
+        // Sample the height of a single text line.
+        measure_width(&mut state.measurer, self, hint_factor, "Xg");
+        let line_height = state.measurer.min_bounds().height;
+        state.row_height = line_height + self.padding_y * 2.0;
+        state.header_height = state.row_height;
+
+        let mut widths = Vec::with_capacity(self.columns.len());
+
+        for (index, column) in self.columns.iter().enumerate() {
+            let mut max = measure_width(&mut state.measurer, self, hint_factor, column.name());
+
+            for row in self.rows.iter() {
+                if let Some(cell) = row.cells().get(index) {
+                    max = max.max(measure_width(
+                        &mut state.measurer,
+                        self,
+                        hint_factor,
+                        cell.as_str(),
+                    ));
+                }
+            }
+
+            widths.push((max + self.padding_x * 2.0).clamp(self.min_col_width, self.max_col_width));
+        }
+
+        state.column_widths = widths;
+        state.content_width = state.column_widths.iter().sum::<f32>();
+        state.content_height = state.header_height + self.rows.len() as f32 * state.row_height;
+    }
 }
 
 /// A cheap fingerprint of the table data, used to detect when cell
@@ -98,12 +164,20 @@ struct Signature {
 }
 
 impl Signature {
-    fn of(table: &Table) -> Self {
-        let chars = table.columns.iter().map(String::len).sum::<usize>()
+    fn of<Col, Row>(table: &Table<Col, Row>) -> Self
+    where
+        Col: TableColumn,
+        Row: TableRow,
+    {
+        let chars = table
+            .columns
+            .iter()
+            .map(|column| column.name().len())
+            .sum::<usize>()
             + table
                 .rows
                 .iter()
-                .flat_map(|row| row.iter().map(String::len))
+                .flat_map(|row| row.cells().iter().map(|cell| cell.as_str().len()))
                 .sum::<usize>();
 
         Self {
@@ -274,12 +348,17 @@ fn thumb_jump(state: &mut State<impl Paragraph>, bounds: Rectangle, axis: Axis, 
     }
 }
 
-fn measure_width<P: Paragraph<Font = iced::Font>>(
+fn measure_width<P, Col, Row>(
     measurer: &mut Plain<P>,
-    table: &Table,
+    table: &Table<Col, Row>,
     hint_factor: Option<f32>,
     content: &str,
-) -> f32 {
+) -> f32
+where
+    P: Paragraph<Font = iced::Font>,
+    Col: TableColumn,
+    Row: TableRow,
+{
     measurer.update(Text {
         content,
         bounds: Size::new(f32::MAX, f32::MAX),
@@ -297,43 +376,11 @@ fn measure_width<P: Paragraph<Font = iced::Font>>(
     measurer.min_bounds().width
 }
 
-impl Table {
-    fn refresh_measurements<P: Paragraph<Font = iced::Font>>(
-        &self,
-        renderer: &impl text::Renderer<Paragraph = P, Font = iced::Font>,
-        state: &mut State<P>,
-    ) {
-        let hint_factor = renderer.hint_factor();
-
-        // Sample the height of a single text line.
-        measure_width(&mut state.measurer, self, hint_factor, "Xg");
-        let line_height = state.measurer.min_bounds().height;
-        state.row_height = line_height + self.padding_y * 2.0;
-        state.header_height = state.row_height;
-
-        let mut widths = Vec::with_capacity(self.columns.len());
-
-        for (index, name) in self.columns.iter().enumerate() {
-            let mut max = measure_width(&mut state.measurer, self, hint_factor, name);
-
-            for row in &self.rows {
-                if let Some(cell) = row.get(index) {
-                    max = max.max(measure_width(&mut state.measurer, self, hint_factor, cell));
-                }
-            }
-
-            widths.push((max + self.padding_x * 2.0).clamp(self.min_col_width, self.max_col_width));
-        }
-
-        state.column_widths = widths;
-        state.content_width = state.column_widths.iter().sum::<f32>();
-        state.content_height = state.header_height + self.rows.len() as f32 * state.row_height;
-    }
-}
-
-impl<Message, R> Widget<Message, iced::Theme, R> for Table
+impl<'a, Message, R, Col, Row> Widget<Message, iced::Theme, R> for Table<'a, Col, Row>
 where
     R: text::Renderer<Font = iced::Font>,
+    Col: TableColumn,
+    Row: TableRow,
 {
     fn size(&self) -> Size<Length> {
         Size {
@@ -711,7 +758,7 @@ where
                         renderer,
                         self,
                         (HEADER, index),
-                        &self.columns[index],
+                        self.columns[index].name(),
                         content_rect(
                             Rectangle {
                                 x: cx,
@@ -757,7 +804,7 @@ where
                             );
                         }
 
-                        let row = &self.rows[row_index];
+                        let row = self.rows[row_index].cells();
 
                         for index in first_col..=last_col {
                             let cell = row.get(index).map(String::as_str).unwrap_or("");
@@ -812,8 +859,8 @@ where
             let col_span = first_col.checked_sub(col_margin).unwrap_or(0)..last_col + col_margin;
 
             cache.retain(|&(row, col), _| {
-                row == HEADER
-                    || col == GUTTER
+                (row == HEADER && (col == HEADER || col_span.contains(&col)))
+                    || (col == GUTTER && row_span.contains(&row))
                     || (row_span.contains(&row) && col_span.contains(&col))
             });
 
@@ -855,11 +902,13 @@ where
     }
 }
 
-impl<'a, Message, R> From<Table> for Element<'a, Message, iced::Theme, R>
+impl<'a, Message, R, Col, Row> From<Table<'a, Col, Row>> for Element<'a, Message, iced::Theme, R>
 where
     R: text::Renderer<Font = iced::Font> + 'a,
+    Col: TableColumn + 'a,
+    Row: TableRow + 'a,
 {
-    fn from(table: Table) -> Self {
+    fn from(table: Table<'a, Col, Row>) -> Self {
         Element::new(table)
     }
 }
@@ -913,7 +962,11 @@ fn visible_rows(
 }
 
 /// The padded content box of a cell.
-fn content_rect(cell: Rectangle, table: &Table) -> Rectangle {
+fn content_rect<Col, Row>(cell: Rectangle, table: &Table<Col, Row>) -> Rectangle
+where
+    Col: TableColumn,
+    Row: TableRow,
+{
     Rectangle {
         x: cell.x + table.padding_x,
         y: cell.y + table.padding_y,
@@ -945,16 +998,20 @@ fn fill_quad(renderer: &mut impl Renderer, bounds: Rectangle, color: Color) {
 
 /// Draws a cell, reusing its shaped [`Paragraph`] across frames so that
 /// scrolling only pays for cells entering the viewport.
-fn draw_cell<P: Paragraph<Font = iced::Font>>(
+fn draw_cell<P, Col, Row>(
     cache: &mut HashMap<(usize, usize), Plain<P>>,
     renderer: &mut impl text::Renderer<Paragraph = P, Font = iced::Font>,
-    table: &Table,
+    table: &Table<Col, Row>,
     key: (usize, usize),
     content: &str,
     rect: Rectangle,
     color: Color,
     clip_bounds: Rectangle,
-) {
+) where
+    P: Paragraph<Font = iced::Font>,
+    Col: TableColumn,
+    Row: TableRow,
+{
     let paragraph = cache.entry(key).or_default();
     paragraph.update(Text {
         content,

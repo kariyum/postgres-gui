@@ -258,45 +258,31 @@ impl EditorConfig {
     }
 
     fn view_table(&self) -> Element<'_, Message> {
-        let content: Element<'_, Message> = match (&self.result, &self.error, self.running) {
-            (Some(result), _, _) if result.columns.is_empty() => container(
-                text(&result.message)
-                    .size(13)
-                    .color(crate::theme::SUCCESS),
-            )
-            .padding(16)
-            .into(),
-            (Some(result), _, _) => {
-                let columns = result
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<Vec<_>>();
-                let rows = result
-                    .rows
-                    .iter()
-                    .map(|row| row.cells.clone())
-                    .collect::<Vec<_>>();
-
-                crate::widgets::table::Table::new(columns, rows).into()
+        let content: Element<'_, Message> = if let Some(ref result) = self.result {
+            if result.columns.is_empty() {
+                container(text(&result.message).size(13).color(crate::theme::SUCCESS))
+                    .padding(16)
+                    .into()
+            } else {
+                crate::widgets::table::Table::new(&result.columns, &result.rows).into()
             }
-            (None, Some(error), _) => {
-                container(text(error).size(13).color(crate::theme::DANGER)).padding(16).into()
-            }
-            (None, None, true) => container(
-                text("Running query...")
-                    .size(13)
-                    .color(crate::theme::TEXT_MUTED),
-            )
-            .padding(16)
-            .into(),
-            (None, None, false) => container(
+        } else if let Some(ref error) = self.error {
+            container(text(error).size(13).color(crate::theme::DANGER))
+                .padding(16)
+                .into()
+        } else if self.running {
+            text("Running query...")
+                .size(13)
+                .color(crate::theme::TEXT_MUTED)
+                .into()
+        } else {
+            container(
                 text("Run a query to see results here.")
                     .size(13)
                     .color(crate::theme::TEXT_MUTED),
             )
             .padding(16)
-            .into(),
+            .into()
         };
 
         container(column![rule::horizontal(1), content])
