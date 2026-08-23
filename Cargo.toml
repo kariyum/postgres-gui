@@ -37,7 +37,6 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing-appender = "0.2.5"
 
 [patch.crates-io]
-iced_fonts = { git = "https://github.com/Redhawk18/iced_fonts" }
 iced = { git = "https://github.com/kariyum/iced", rev = "3c81aac2e1b48125efdf0c996fbbb9c72c06ae50" }
 iced_core = { git = "https://github.com/kariyum/iced", rev = "3c81aac2e1b48125efdf0c996fbbb9c72c06ae50" }
 iced_widget = { git = "https://github.com/kariyum/iced", rev = "3c81aac2e1b48125efdf0c996fbbb9c72c06ae50" }

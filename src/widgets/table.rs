@@ -21,7 +21,9 @@ use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::widget::{self, Tree, Widget};
 use iced::advanced::{Renderer, Shell};
 use iced::alignment;
-use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, keyboard, window};
+use iced::theme::Palette;
+use iced::{Color, Element, Event, Font, Length, Pixels, Point, Size, keyboard, window};
+use iced_renderer::graphics::text::paragraph;
 
 /// Width of the row-number gutter column.
 const GUTTER_WIDTH: f32 = 48.0;
@@ -42,6 +44,16 @@ pub trait TableRow {
     fn cells(&self) -> &[String];
 }
 
+trait Rectangle {
+    fn with_padding(self) -> Self;
+}
+
+impl Rectangle for iced::Rectangle {
+    fn with_padding(self) -> Self {
+        todo!()
+    }
+}
+
 /// A run of the data table widget.
 ///
 /// `Col` is the column type and `Row` the row type; both only need to expose
@@ -56,7 +68,7 @@ where
     rows: &'a [Row],
     gutter: bool,
     font: Font,
-    size: f32,
+    text_size: f32,
     padding_x: f32,
     padding_y: f32,
     min_col_width: f32,
@@ -78,7 +90,7 @@ where
             rows,
             gutter: true,
             font: Font::MONOSPACE,
-            size: 12.0,
+            text_size: 12.0,
             padding_x: 8.0,
             padding_y: 5.0,
             min_col_width: 80.0,
@@ -100,7 +112,7 @@ where
 
     /// Sets the text size of the table cells.
     pub fn size(mut self, size: f32) -> Self {
-        self.size = size;
+        self.text_size = size;
         self
     }
 
@@ -151,6 +163,95 @@ where
         state.column_widths = widths;
         state.content_width = state.column_widths.iter().sum::<f32>();
         state.content_height = state.header_height + self.rows.len() as f32 * state.row_height;
+    }
+
+    fn draw_gutter<R>(
+        &self,
+        state: &State<<R>::Paragraph>,
+        renderer: &mut R,
+        gutter_bounds: iced::Rectangle,
+        palette: &Palette,
+        cache: &mut std::cell::RefMut<'_, HashMap<(usize, usize), Plain<<R>::Paragraph>>>,
+    ) where
+        R: text::Renderer<Font = iced::Font>,
+    {
+        let body_top = gutter_bounds.y + state.header_height;
+        let gutter_bg = Color::from_rgba(1.0, 1.0, 1.0, 0.06);
+        let body_height = (gutter_bounds.height - state.header_height).max(0.0);
+        let muted = crate::theme::TEXT_MUTED;
+
+        renderer.with_layer(gutter_bounds, |renderer| {
+            draw_separator(renderer, gutter_bounds, palette);
+
+            draw_cell(
+                cache,
+                renderer,
+                self,
+                (HEADER, HEADER),
+                "#",
+                content_rect(
+                    iced::Rectangle {
+                        x: gutter_bounds.x,
+                        y: gutter_bounds.y,
+                        width: GUTTER_WIDTH,
+                        height: state.header_height,
+                    },
+                    self,
+                ),
+                muted,
+                gutter_bounds,
+            );
+
+            // Sticky gutter cells are drawn last so they always sit on top of
+            // the clipped columns at the boundary.
+            let rows = visible_rows(
+                state.offset_y,
+                state.row_height,
+                body_height,
+                self.rows.len(),
+            );
+            let gutter_indices_bounds = iced::Rectangle {
+                x: gutter_bounds.x,
+                y: gutter_bounds.y + state.header_height,
+                width: gutter_bounds.width,
+                height: gutter_bounds.height - state.header_height,
+            };
+            renderer.with_layer(gutter_indices_bounds, |renderer| {
+                for row_index in rows {
+                    let y = body_top + row_index as f32 * state.row_height - state.offset_y;
+
+                    fill_quad(
+                        renderer,
+                        iced::Rectangle {
+                            x: gutter_indices_bounds.x,
+                            y,
+                            width: GUTTER_WIDTH,
+                            height: state.row_height,
+                        },
+                        gutter_bg,
+                    );
+
+                    draw_cell(
+                        cache,
+                        renderer,
+                        self,
+                        (row_index, GUTTER),
+                        &(row_index + 1).to_string(),
+                        content_rect(
+                            iced::Rectangle {
+                                x: gutter_indices_bounds.x,
+                                y,
+                                width: GUTTER_WIDTH,
+                                height: state.row_height,
+                            },
+                            self,
+                        ),
+                        muted,
+                        gutter_indices_bounds,
+                    );
+                }
+            });
+        })
     }
 }
 
@@ -212,6 +313,7 @@ struct State<P: Paragraph> {
     keyboard_modifiers: keyboard::Modifiers,
     paragraphs: RefCell<HashMap<(usize, usize), Plain<P>>>,
     dragging: Option<Drag>,
+    cell_paragraphs: Vec<P>,
 }
 
 /// Row/column indices used to address cached paragraphs.
@@ -240,6 +342,7 @@ impl<P: Paragraph> Default for State<P> {
             keyboard_modifiers: keyboard::Modifiers::default(),
             paragraphs: RefCell::new(HashMap::new()),
             dragging: None,
+            cell_paragraphs: Vec::new(),
         }
     }
 }
@@ -250,15 +353,15 @@ enum Axis {
     Horizontal,
 }
 
-fn track(bounds: Rectangle, axis: Axis) -> Rectangle {
+fn track(bounds: iced::Rectangle, axis: Axis) -> iced::Rectangle {
     match axis {
-        Axis::Vertical => Rectangle {
+        Axis::Vertical => iced::Rectangle {
             x: bounds.x + bounds.width - SCROLLBAR_WIDTH,
             y: bounds.y,
             width: SCROLLBAR_WIDTH,
             height: bounds.height - SCROLLBAR_WIDTH,
         },
-        Axis::Horizontal => Rectangle {
+        Axis::Horizontal => iced::Rectangle {
             x: bounds.x,
             y: bounds.y + bounds.height - SCROLLBAR_WIDTH,
             width: bounds.width - SCROLLBAR_WIDTH,
@@ -267,16 +370,20 @@ fn track(bounds: Rectangle, axis: Axis) -> Rectangle {
     }
 }
 
-fn max_offset_x(state: &State<impl Paragraph>, bounds: Rectangle) -> f32 {
+fn max_offset_x(state: &State<impl Paragraph>, bounds: iced::Rectangle) -> f32 {
     (state.content_width + GUTTER_WIDTH - bounds.width).max(0.0)
 }
 
-fn max_offset_y(state: &State<impl Paragraph>, bounds: Rectangle) -> f32 {
+fn max_offset_y(state: &State<impl Paragraph>, bounds: iced::Rectangle) -> f32 {
     let body_height = (bounds.height - state.header_height).max(0.0);
     (state.content_height - state.header_height - body_height).max(0.0)
 }
 
-fn scroller(state: &State<impl Paragraph>, bounds: Rectangle, axis: Axis) -> Option<Rectangle> {
+fn scroller(
+    state: &State<impl Paragraph>,
+    bounds: iced::Rectangle,
+    axis: Axis,
+) -> Option<iced::Rectangle> {
     match axis {
         Axis::Vertical => {
             let max = max_offset_y(state, bounds);
@@ -289,7 +396,7 @@ fn scroller(state: &State<impl Paragraph>, bounds: Rectangle, axis: Axis) -> Opt
                 .clamp(MIN_SCROLLER, track.height);
             let travel = (track.height - height).max(0.0);
 
-            Some(Rectangle {
+            Some(iced::Rectangle {
                 x: track.x,
                 y: track.y + travel * (state.offset_y / max),
                 width: SCROLLBAR_WIDTH,
@@ -307,7 +414,7 @@ fn scroller(state: &State<impl Paragraph>, bounds: Rectangle, axis: Axis) -> Opt
                 .clamp(MIN_SCROLLER, track.width);
             let travel = (track.width - width).max(0.0);
 
-            Some(Rectangle {
+            Some(iced::Rectangle {
                 x: track.x + travel * (state.offset_x / max),
                 y: track.y,
                 width,
@@ -319,7 +426,12 @@ fn scroller(state: &State<impl Paragraph>, bounds: Rectangle, axis: Axis) -> Opt
 
 /// Snaps the scroll offset so the thumb is centered on the click, if the
 /// click fell on the scrollbar track (outside the thumb itself).
-fn thumb_jump(state: &mut State<impl Paragraph>, bounds: Rectangle, axis: Axis, position: f32) {
+fn thumb_jump(
+    state: &mut State<impl Paragraph>,
+    bounds: iced::Rectangle,
+    axis: Axis,
+    position: f32,
+) {
     let Some(rect) = scroller(state, bounds, axis) else {
         return;
     };
@@ -362,9 +474,9 @@ where
     measurer.update(Text {
         content,
         bounds: Size::new(f32::MAX, f32::MAX),
-        size: Pixels(table.size),
+        size: Pixels(table.text_size),
         line_height: text::LineHeight::default(),
-        font: table.font,
+        font: Font::MONOSPACE,
         align_x: text::Alignment::Left,
         align_y: alignment::Vertical::Top,
         shaping: text::Shaping::default(),
@@ -400,19 +512,11 @@ where
     fn layout(&mut self, tree: &mut Tree, renderer: &R, limits: &Limits) -> Node {
         let state = tree.state.downcast_mut::<State<R::Paragraph>>();
 
-        let signature = Signature::of(self);
-        if state.signature != signature {
-            state.signature = signature;
-            self.refresh_measurements(renderer, state);
-            state.offset_x = 0.0;
-            state.offset_y = 0.0;
-            state.target_x = 0.0;
-            state.target_y = 0.0;
-            state.paragraphs.borrow_mut().clear();
-        }
+        self.refresh_measurements(renderer, state);
+        state.paragraphs.borrow_mut().clear();
 
         let size = limits.max();
-        let bounds = Rectangle::new(Point::ORIGIN, size);
+        let bounds = iced::Rectangle::new(Point::ORIGIN, size);
         state.offset_x = state.offset_x.clamp(0.0, max_offset_x(state, bounds));
         state.offset_y = state.offset_y.clamp(0.0, max_offset_y(state, bounds));
         state.target_x = state.target_x.clamp(0.0, max_offset_x(state, bounds));
@@ -429,7 +533,7 @@ where
         cursor: mouse::Cursor,
         _renderer: &R,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        _viewport: &iced::Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State<R::Paragraph>>();
         let bounds = layout.bounds();
@@ -590,7 +694,7 @@ where
         _style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
+        _viewport: &iced::Rectangle,
     ) {
         let state = tree.state.downcast_ref::<State<R::Paragraph>>();
 
@@ -601,8 +705,8 @@ where
         let bounds = layout.bounds();
         let palette = theme.palette();
 
-        let scroll_x = state.offset_x.clamp(0.0, max_offset_x(state, bounds));
-        let scroll_y = state.offset_y.clamp(0.0, max_offset_y(state, bounds));
+        let scroll_x = state.offset_x;
+        let scroll_y = state.offset_y;
 
         let gutter_width = if self.gutter { GUTTER_WIDTH } else { 0.0 };
         let row_height = state.row_height;
@@ -610,9 +714,8 @@ where
         let body_height = (bounds.height - state.header_height).max(0.0);
 
         let zebra = Color::from_rgba(1.0, 1.0, 1.0, 0.03);
-        let gutter_bg = Color::from_rgba(1.0, 1.0, 1.0, 0.06);
-        let separator = palette.background.strong.color;
-        let header_bg = palette.background.strong.color;
+        let separator_color = palette.background.strong.color;
+        let header_bg = palette.background.stronger.color;
         let body_bg = palette.background.base.color;
         let text_color = crate::theme::TEXT;
         let muted = crate::theme::TEXT_MUTED;
@@ -621,123 +724,26 @@ where
 
         renderer.with_layer(bounds, |renderer| {
             fill_quad(renderer, bounds, body_bg);
-            fill_quad(
-                renderer,
-                Rectangle {
-                    x: bounds.x,
-                    y: bounds.y,
-                    width: bounds.width,
-                    height: state.header_height,
-                },
-                header_bg,
-            );
+            fill_header_bg(renderer, state, bounds, header_bg);
 
-            // Cached, already-shaped paragraphs of the visible cells.
             let mut cache = state.paragraphs.borrow_mut();
 
-            // Column start positions, in content coordinates (the gutter is sticky).
-            let mut xs = Vec::with_capacity(state.column_widths.len());
-            let mut x = 0.0;
-            for &width in &state.column_widths {
-                xs.push(x);
-                x += width;
-            }
-
-            // Visible column range.
-            let Some((first_col, last_col)) =
-                visible_columns(&xs, &state.column_widths, scroll_x, bounds.width)
-            else {
-                return;
-            };
-
-            let gutter_bounds = Rectangle {
+            let gutter_bounds = iced::Rectangle {
                 x: bounds.x,
                 y: bounds.y,
                 width: GUTTER_WIDTH,
                 height: bounds.height,
             };
 
-            renderer.with_layer(gutter_bounds, |renderer| {
-                fill_quad(
-                    renderer,
-                    Rectangle {
-                        x: gutter_bounds.x + GUTTER_WIDTH - 1.0,
-                        y: gutter_bounds.y,
-                        width: 1.0,
-                        height: gutter_bounds.height,
-                    },
-                    separator,
-                );
+            self.draw_gutter(state, renderer, gutter_bounds, palette, &mut cache);
 
-                draw_cell(
-                    &mut cache,
-                    renderer,
-                    self,
-                    (HEADER, HEADER),
-                    "#",
-                    content_rect(
-                        Rectangle {
-                            x: gutter_bounds.x,
-                            y: gutter_bounds.y,
-                            width: gutter_width,
-                            height: state.header_height,
-                        },
-                        self,
-                    ),
-                    muted,
-                    gutter_bounds,
-                );
-
-                // Sticky gutter cells are drawn last so they always sit on top of
-                // the clipped columns at the boundary.
-                let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
-                let gutter_indices_bounds = Rectangle {
-                    x: gutter_bounds.x,
-                    y: gutter_bounds.y + state.header_height,
-                    width: gutter_bounds.width,
-                    height: gutter_bounds.height - state.header_height,
-                };
-                renderer.with_layer(gutter_indices_bounds, |renderer| {
-                    for row_index in rows {
-                        let y = body_top + row_index as f32 * row_height - scroll_y;
-
-                        fill_quad(
-                            renderer,
-                            Rectangle {
-                                x: gutter_indices_bounds.x,
-                                y,
-                                width: gutter_width,
-                                height: row_height,
-                            },
-                            gutter_bg,
-                        );
-
-                        draw_cell(
-                            &mut cache,
-                            renderer,
-                            self,
-                            (row_index, GUTTER),
-                            &(row_index + 1).to_string(),
-                            content_rect(
-                                Rectangle {
-                                    x: gutter_indices_bounds.x,
-                                    y,
-                                    width: gutter_width,
-                                    height: row_height,
-                                },
-                                self,
-                            ),
-                            muted,
-                            gutter_indices_bounds,
-                        );
-                    }
-                });
-            });
+            let column_end_xs = compute_column_end_xs(&state.column_widths);
+            let (first_col, last_col) = visible_columns(&column_end_xs, scroll_x, bounds.width);
 
             // Everything that scrolls horizontally — column separators, header
             // columns, and body cells — is clipped to the right of the sticky
             // gutter, so it can never paint over it.
-            let body_bounds = Rectangle {
+            let body_bounds = iced::Rectangle {
                 x: bounds.x + gutter_width,
                 y: bounds.y,
                 width: (bounds.width - gutter_width).max(0.0),
@@ -746,12 +752,12 @@ where
 
             renderer.with_layer(body_bounds, |renderer| {
                 for index in first_col..=last_col {
-                    let cx = body_bounds.x + xs[index] - scroll_x;
-                    fill_quad(renderer, quad_rect(body_bounds, cx, 1.0), separator);
+                    let cx = body_bounds.x + column_end_xs[index] - scroll_x;
+                    fill_quad(renderer, quad_rect(body_bounds, cx, 1.0), separator_color);
                 }
 
                 for index in first_col..=last_col {
-                    let cx = body_bounds.x + xs[index] - scroll_x;
+                    let cx = body_bounds.x + column_end_xs[index] - scroll_x;
 
                     draw_cell(
                         &mut cache,
@@ -760,7 +766,7 @@ where
                         (HEADER, index),
                         self.columns[index].name(),
                         content_rect(
-                            Rectangle {
+                            iced::Rectangle {
                                 x: cx,
                                 y: body_bounds.y,
                                 width: state.column_widths[index],
@@ -781,7 +787,7 @@ where
                 // the header so scrolled content never paints over it).
                 let rows = visible_rows(scroll_y, row_height, body_height, self.rows.len());
 
-                let rows_body_bounds = Rectangle {
+                let rows_body_bounds = iced::Rectangle {
                     x: body_bounds.x,
                     y: body_bounds.y + state.header_height,
                     width: body_bounds.width,
@@ -794,7 +800,7 @@ where
                         if row_index % 2 == 1 {
                             fill_quad(
                                 renderer,
-                                Rectangle {
+                                iced::Rectangle {
                                     x: rows_body_bounds.x,
                                     y,
                                     width: rows_body_bounds.width,
@@ -817,8 +823,8 @@ where
                                 (row_index, index),
                                 cell,
                                 content_rect(
-                                    Rectangle {
-                                        x: rows_body_bounds.x + xs[index] - scroll_x,
+                                    iced::Rectangle {
+                                        x: rows_body_bounds.x + column_end_xs[index] - scroll_x,
                                         y,
                                         width: state.column_widths[index],
                                         height: row_height,
@@ -838,13 +844,13 @@ where
             if !self.rows.is_empty() {
                 fill_quad(
                     renderer,
-                    Rectangle {
+                    iced::Rectangle {
                         x: bounds.x,
                         y: bounds.y + state.header_height - 1.0,
                         width: bounds.width,
                         height: 1.0,
                     },
-                    separator,
+                    separator_color,
                 );
             }
 
@@ -882,7 +888,7 @@ where
         tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _viewport: &Rectangle,
+        _viewport: &iced::Rectangle,
         _renderer: &R,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State<R::Paragraph>>();
@@ -902,6 +908,55 @@ where
     }
 }
 
+fn compute_column_end_xs(column_widths: &Vec<f32>) -> Vec<f32> {
+    let mut xs = Vec::with_capacity(column_widths.len());
+    let mut x = 0.0;
+    for width in column_widths {
+        xs.push(x);
+        x += width;
+    }
+    xs
+}
+
+fn fill_header_bg<R>(
+    renderer: &mut R,
+    state: &State<<R>::Paragraph>,
+    bounds: iced::Rectangle,
+    header_bg: Color,
+) where
+    R: text::Renderer<Font = iced::Font>,
+{
+    fill_quad(
+        renderer,
+        iced::Rectangle {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: state.header_height,
+        },
+        header_bg,
+    );
+}
+
+fn draw_separator<R>(renderer: &mut R, bounds: iced::Rectangle, palette: &Palette)
+where
+    R: text::Renderer<Font = iced::Font>,
+{
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: iced::Rectangle {
+                x: bounds.x + GUTTER_WIDTH - 1.0,
+                y: bounds.y,
+                width: 1.0,
+                height: bounds.height,
+            },
+            snap: true,
+            ..renderer::Quad::default()
+        },
+        palette.background.strong.color,
+    );
+}
+
 impl<'a, Message, R, Col, Row> From<Table<'a, Col, Row>> for Element<'a, Message, iced::Theme, R>
 where
     R: text::Renderer<Font = iced::Font> + 'a,
@@ -913,34 +968,16 @@ where
     }
 }
 
-/// Returns the inclusive range of columns overlapping the visible window of
-/// given width, starting at `scroll_x` (in content coordinates).
-fn visible_columns(
-    xs: &[f32],
-    widths: &[f32],
-    scroll_x: f32,
-    viewport_width: f32,
-) -> Option<(usize, usize)> {
-    let mut first = None;
-    let mut last = 0;
+fn visible_columns(xs: &[f32], scroll_x: f32, viewport_width: f32) -> (usize, usize) {
+    let viewport_end = scroll_x + viewport_width;
+    let first_column_index = xs
+        .iter()
+        .position(|x| scroll_x < *x)
+        .unwrap_or(0)
+        .saturating_sub(1);
+    let last_column_index = xs.iter().rposition(|x| *x < viewport_end).unwrap_or(0);
 
-    for (index, (&cx, &width)) in xs.iter().zip(widths).enumerate() {
-        if cx + width <= scroll_x {
-            continue;
-        }
-
-        if first.is_none() {
-            first = Some(index);
-        }
-
-        if cx > scroll_x + viewport_width {
-            break;
-        }
-
-        last = index;
-    }
-
-    first.map(|first| (first, last))
+    (first_column_index, last_column_index)
 }
 
 /// Returns the range of rows overlapping a body viewport of `viewport_height`
@@ -962,12 +999,12 @@ fn visible_rows(
 }
 
 /// The padded content box of a cell.
-fn content_rect<Col, Row>(cell: Rectangle, table: &Table<Col, Row>) -> Rectangle
+fn content_rect<Col, Row>(cell: iced::Rectangle, table: &Table<Col, Row>) -> iced::Rectangle
 where
     Col: TableColumn,
     Row: TableRow,
 {
-    Rectangle {
+    iced::Rectangle {
         x: cell.x + table.padding_x,
         y: cell.y + table.padding_y,
         width: (cell.width - table.padding_x * 2.0).max(0.0),
@@ -976,8 +1013,8 @@ where
 }
 
 /// A full-height, 1-pixel separator clipped to the table bounds.
-fn quad_rect(bounds: Rectangle, x: f32, width: f32) -> Rectangle {
-    Rectangle {
+fn quad_rect(bounds: iced::Rectangle, x: f32, width: f32) -> iced::Rectangle {
+    iced::Rectangle {
         x,
         y: bounds.y,
         width,
@@ -985,7 +1022,7 @@ fn quad_rect(bounds: Rectangle, x: f32, width: f32) -> Rectangle {
     }
 }
 
-fn fill_quad(renderer: &mut impl Renderer, bounds: Rectangle, color: Color) {
+fn fill_quad(renderer: &mut impl Renderer, bounds: iced::Rectangle, color: Color) {
     renderer.fill_quad(
         renderer::Quad {
             bounds,
@@ -998,27 +1035,26 @@ fn fill_quad(renderer: &mut impl Renderer, bounds: Rectangle, color: Color) {
 
 /// Draws a cell, reusing its shaped [`Paragraph`] across frames so that
 /// scrolling only pays for cells entering the viewport.
-fn draw_cell<P, Col, Row>(
-    cache: &mut HashMap<(usize, usize), Plain<P>>,
-    renderer: &mut impl text::Renderer<Paragraph = P, Font = iced::Font>,
-    table: &Table<Col, Row>,
-    key: (usize, usize),
+fn draw_cell<P, R, Col, Row>(
     content: &str,
-    rect: Rectangle,
+    clip_bounds: iced::Rectangle,
+    cell_bounds: iced::Rectangle,
+    renderer: &mut R,
     color: Color,
-    clip_bounds: Rectangle,
+    paragraph: &mut Plain<P>,
 ) where
     P: Paragraph<Font = iced::Font>,
+    R: text::Renderer<Paragraph = P, Font = iced::Font>,
     Col: TableColumn,
     Row: TableRow,
 {
-    let paragraph = cache.entry(key).or_default();
+    // why are we doing this here?
     paragraph.update(Text {
         content,
-        bounds: Size::new(rect.width, rect.height),
-        size: Pixels(table.size),
+        bounds: Size::new(cell_bounds.width, cell_bounds.height),
+        size: Pixels(12.0),
         line_height: text::LineHeight::default(),
-        font: table.font,
+        font: Font::MONOSPACE,
         align_x: text::Alignment::Left,
         align_y: alignment::Vertical::Center,
         shaping: text::Shaping::default(),
@@ -1029,7 +1065,7 @@ fn draw_cell<P, Col, Row>(
 
     renderer.fill_paragraph(
         paragraph.raw(),
-        Point::new(rect.x, rect.y),
+        Point::new(cell_bounds.x, cell_bounds.y),
         color,
         clip_bounds,
     );
