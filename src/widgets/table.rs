@@ -206,16 +206,22 @@ where
         widget::tree::State::new(State::<R::Paragraph>::default())
     }
 
-    fn layout(&mut self, _: &mut Tree, _: &R, limits: &Limits) -> Node {
-        Node::new(limits.resolve(
-            self.width,
-            self.height,
-            Size {
-                width: self.columns.len() as f32 * (self.min_col_width + self.separator_width)
-                    + self.gutter_width,
-                height: self.rows.len() as f32 * (self.row_height + self.separator_width),
-            },
-        ))
+    #[instrument(skip_all)]
+    fn layout(&mut self, tree: &mut Tree, renderer: &R, limits: &Limits) -> Node {
+        let state = tree.state.downcast_mut::<State<R::Paragraph>>();
+        let start = Instant::now();
+        let node = self.layout(renderer, limits, state);
+        tracing::info!("took {:?}", start.elapsed());
+        node
+        // Node::new(limits.resolve(
+        //     self.width,
+        //     self.height,
+        //     Size {
+        //         width: self.columns.len() as f32 * (self.min_col_width + self.separator_width)
+        //             + self.gutter_width,
+        //         height: self.rows.len() as f32 * (self.row_height + self.separator_width),
+        //     },
+        // ))
     }
 
     fn draw(
@@ -230,44 +236,23 @@ where
     ) {
         let state = tree.state.downcast_ref::<State<R::Paragraph>>();
         let palette = theme.palette();
-        let text_config = Text {
-            content: "",
-            bounds: layout.bounds().size(),
-            size: Pixels(12.0),
-            line_height: text::LineHeight::default(),
-            font: Font::MONOSPACE,
-            align_x: text::Alignment::Left,
-            align_y: alignment::Vertical::Center,
-            shaping: text::Shaping::default(),
-            wrapping: text::Wrapping::None,
-            ellipsis: text::Ellipsis::End,
-            hint_factor: renderer.hint_factor(),
-        };
-        println!("viewport {:?}", _viewport);
-        renderer.with_layer(*_viewport, |renderer| {
+        renderer.with_layer(layout.bounds(), |renderer| {
             let gutter_bounds = iced::Rectangle {
                 width: GUTTER_WIDTH,
-                ..*_viewport
+                ..layout.bounds()
             };
             renderer.with_layer(gutter_bounds, |renderer| {
-                let gutter_paragraphs =
-                    compute_gutter_paragraphs::<R::Paragraph>(self.rows.len(), text_config);
-                for (i, cell) in gutter_paragraphs.iter().enumerate() {
-                    println!(
-                        "cell min bounds = {:?}, cell.raw.bounds() = {:?}",
-                        cell.min_bounds(),
-                        cell.raw().bounds()
-                    );
+                for (i, cell) in state.gutter_paragraphs.iter().enumerate() {
                     renderer.fill_paragraph(
                         cell.raw(),
                         Point {
                             x: gutter_bounds.x,
-                            y: i as f32 * cell.min_height(),
+                            y: gutter_bounds.y + i as f32 * cell.min_height(),
                         },
                         Color::WHITE,
                         iced::Rectangle {
                             x: gutter_bounds.x,
-                            y: i as f32 * cell.min_height(),
+                            y: gutter_bounds.y + i as f32 * cell.min_height(),
                             width: cell.min_bounds().width,
                             height: cell.min_bounds().height,
                         },
