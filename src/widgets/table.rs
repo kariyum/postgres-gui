@@ -181,7 +181,7 @@ where
     for i in 1..=rows_len {
         gutter_paragraphs[i].update(text_config.with_content(&i.to_string()));
     }
-    tracing::info!("done in {:?}", start.elapsed());
+    tracing::info!("took {:?}", start.elapsed());
     gutter_paragraphs
 }
 
@@ -243,24 +243,30 @@ where
             ellipsis: text::Ellipsis::End,
             hint_factor: renderer.hint_factor(),
         };
-        println!("layout bounds {:?}", layout.bounds());
-        renderer.with_layer(layout.bounds(), |renderer| {
+        println!("viewport {:?}", _viewport);
+        renderer.with_layer(*_viewport, |renderer| {
             let gutter_bounds = iced::Rectangle {
                 width: GUTTER_WIDTH,
-                ..layout.bounds()
+                ..*_viewport
             };
             renderer.with_layer(gutter_bounds, |renderer| {
-                let gutter_paragraphs = compute_gutter_paragraphs(self.rows.len(), text_config);
+                let gutter_paragraphs =
+                    compute_gutter_paragraphs::<R::Paragraph>(self.rows.len(), text_config);
                 for (i, cell) in gutter_paragraphs.iter().enumerate() {
+                    println!(
+                        "cell min bounds = {:?}, cell.raw.bounds() = {:?}",
+                        cell.min_bounds(),
+                        cell.raw().bounds()
+                    );
                     renderer.fill_paragraph(
                         cell.raw(),
                         Point {
-                            x: 0.0,
+                            x: gutter_bounds.x,
                             y: i as f32 * cell.min_height(),
                         },
                         Color::WHITE,
                         iced::Rectangle {
-                            x: 0.0,
+                            x: gutter_bounds.x,
                             y: i as f32 * cell.min_height(),
                             width: cell.min_bounds().width,
                             height: cell.min_bounds().height,
