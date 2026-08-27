@@ -173,6 +173,40 @@ where
             self.fill_gutter_paragraphs(gutter_bounds, state, renderer);
         });
     }
+
+    fn draw_header<R>(
+        &self,
+        bounds: iced::Rectangle,
+        state: &State<R::Paragraph>,
+        palette: &Palette,
+        renderer: &mut R,
+    ) where
+        R: text::Renderer<Font = iced::Font>,
+    {
+        let header_bounds = iced::Rectangle {
+            x: GUTTER_WIDTH + 2.0 * self.padding_x,
+            height: state.header_height,
+            ..bounds
+        };
+        renderer.with_layer(header_bounds, |renderer| {
+            for (i, col) in state.header_paragraphs.iter().enumerate() {
+                renderer.fill_paragraph(
+                    col.raw(),
+                    Point {
+                        x: header_bounds.x + i as f32 * col.min_width(),
+                        y: header_bounds.y,
+                    },
+                    Color::WHITE,
+                    iced::Rectangle {
+                        x: header_bounds.x + i as f32 * col.min_width(),
+                        y: header_bounds.y,
+                        width: col.min_width() + 2.0 * self.padding_x,
+                        height: state.header_height,
+                    },
+                );
+            }
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -289,6 +323,7 @@ where
         let palette = theme.palette();
         renderer.with_layer(layout.bounds(), |renderer| {
             self.draw_gutter(layout.bounds(), state, palette, renderer);
+            self.draw_header(layout.bounds(), state, palette, renderer);
         });
     }
 
