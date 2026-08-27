@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::mouse;
-use iced::advanced::renderer;
+use iced::advanced::renderer::{self, Quad};
 use iced::advanced::text::paragraph::Plain;
 use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::widget::{self, Tree, Widget};
@@ -176,7 +176,7 @@ where
 
     fn draw_header<R>(
         &self,
-        bounds: iced::Rectangle,
+        layout_bounds: iced::Rectangle,
         state: &State<R::Paragraph>,
         palette: &Palette,
         renderer: &mut R,
@@ -184,26 +184,40 @@ where
         R: text::Renderer<Font = iced::Font>,
     {
         let header_bounds = iced::Rectangle {
-            x: GUTTER_WIDTH + 2.0 * self.padding_x,
+            x: GUTTER_WIDTH,
             height: state.header_height,
-            ..bounds
+            width: layout_bounds.width - GUTTER_WIDTH,
+            ..layout_bounds
         };
+        renderer.fill_quad(
+            Quad {
+                bounds: header_bounds,
+                ..Default::default()
+            },
+            palette.background.weaker.color,
+        );
         renderer.with_layer(header_bounds, |renderer| {
+            let mut running_width_sum = 0.0;
             for (i, col) in state.header_paragraphs.iter().enumerate() {
                 renderer.fill_paragraph(
                     col.raw(),
                     Point {
-                        x: header_bounds.x + i as f32 * col.min_width(),
-                        y: header_bounds.y,
+                        x: header_bounds.x
+                            + (running_width_sum + i as f32 * 2.0 * self.padding_x)
+                            + self.padding_x,
+                        y: header_bounds.y + self.padding_y,
                     },
                     Color::WHITE,
                     iced::Rectangle {
-                        x: header_bounds.x + i as f32 * col.min_width(),
-                        y: header_bounds.y,
+                        x: header_bounds.x
+                            + (running_width_sum + i as f32 * 2.0 * self.padding_x)
+                            + self.padding_x,
+                        y: header_bounds.y + self.padding_y,
                         width: col.min_width() + 2.0 * self.padding_x,
                         height: state.header_height,
                     },
                 );
+                running_width_sum += col.min_width();
             }
         });
     }
