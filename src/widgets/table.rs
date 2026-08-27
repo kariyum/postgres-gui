@@ -90,6 +90,8 @@ where
         );
         resize_vec(&mut state.gutter_paragraphs, self.rows.len() + 1);
 
+        state.body_width = 0.0;
+
         let text_config = Text {
             content: "",
             bounds: limits.max(),
@@ -106,6 +108,7 @@ where
 
         for (i, col) in self.columns.iter().enumerate() {
             state.header_paragraphs[i].update(text_config.with_content(col.name()));
+            state.body_width += state.header_paragraphs[i].min_width();
         }
 
         state.gutter_paragraphs[0].update(text_config.with_content("#"));
@@ -116,11 +119,27 @@ where
         }
 
         for (i, cell) in self.rows.iter().flat_map(|row| row.cells()).enumerate() {
-            state.body_paragraphs[i].update(text_config.with_content(cell));
+            let text_config = Text {
+                content: cell.as_str(),
+                bounds: Size {
+                    width: state.header_paragraphs[i % state.header_paragraphs.len()].min_width(),
+                    ..limits.max()
+                },
+                size: Pixels(12.0),
+                line_height: text::LineHeight::default(),
+                font: Font::MONOSPACE,
+                align_x: text::Alignment::Left,
+                align_y: alignment::Vertical::Center,
+                shaping: text::Shaping::default(),
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::End,
+                hint_factor: renderer.hint_factor(),
+            };
+            state.body_paragraphs[i].update(text_config);
         }
 
         state.text_height = state.body_paragraphs[0].min_height();
-        state.cell_height = state.text_height + 2.0 * self.padding_y;
+        state.body_cell_height = state.text_height + 2.0 * self.padding_y;
 
         Node::new(limits.max())
     }
@@ -221,6 +240,67 @@ where
             }
         });
     }
+
+    fn draw_body<R>(
+        &self,
+        layout_bounds: iced::Rectangle,
+        state: &State<R::Paragraph>,
+        palette: &Palette,
+        renderer: &mut R,
+    ) where
+        R: text::Renderer<Font = iced::Font>,
+    {
+        let body_bounds = iced::Rectangle {
+            x: GUTTER_WIDTH,
+            y: layout_bounds.y + state.header_height,
+            width: layout_bounds.width - GUTTER_WIDTH,
+            height: layout_bounds.height - state.header_height,
+        };
+        renderer.fill_quad(
+            Quad {
+                bounds: body_bounds,
+                ..Default::default()
+            },
+            palette.background.weaker.color,
+        );
+        for i in (0..self.rows.len()).step_by(2) {
+            renderer.fill_quad(
+                Quad {
+                    bounds: iced::Rectangle {
+                        y: body_bounds.y + i as f32 * state.body_cell_height,
+                        height: state.body_cell_height,
+                        ..body_bounds
+                    },
+                    ..Default::default()
+                },
+                palette.background.weak.color,
+            );
+        }
+        renderer.with_layer(body_bounds, |renderer| {
+            let mut running_width_sum = 0.0;
+            for (i, cell) in state.body_paragraphs.iter().enumerate() {
+                let cell_width =
+                    state.header_paragraphs[i % state.header_paragraphs.len()].min_width();
+                let line_index = (i / self.columns.len()) as f32;
+                let x = body_bounds.x
+                    + (running_width_sum + (i % self.columns.len()) as f32 * 2.0 * self.padding_x)
+                    + self.padding_x;
+                let y = body_bounds.y + line_index * state.body_cell_height + self.padding_y;
+                renderer.fill_paragraph(
+                    cell.raw(),
+                    Point { x, y },
+                    Color::WHITE,
+                    iced::Rectangle {
+                        x,
+                        y,
+                        width: cell_width + 2.0 * self.padding_x,
+                        height: state.header_height,
+                    },
+                );
+                running_width_sum = (running_width_sum + cell_width) % state.body_width;
+            }
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -238,9 +318,10 @@ struct State<P: Paragraph> {
     vertical_scroll_position: ScrollPosition,
     keyboard_modifiers: keyboard::Modifiers,
     dragging: Option<Drag>,
-    text_height: f32,
-    cell_height: f32,
+    text_height: f32, // can be needed for cotent rect
+    body_cell_height: f32,
     header_height: f32,
+    body_width: f32,
 }
 
 #[derive(Debug, Default)]
@@ -261,8 +342,9 @@ impl<P: Paragraph> Default for State<P> {
             body_paragraphs: Vec::new(),
             gutter_paragraphs: Vec::new(),
             text_height: 0.0,
-            cell_height: 0.0,
+            body_cell_height: 0.0,
             header_height: 0.0,
+            body_width: 0.0,
         }
     }
 }
@@ -338,6 +420,7 @@ where
         renderer.with_layer(layout.bounds(), |renderer| {
             self.draw_gutter(layout.bounds(), state, palette, renderer);
             self.draw_header(layout.bounds(), state, palette, renderer);
+            self.draw_body(layout.bounds(), state, palette, renderer);
         });
     }
 
@@ -362,14 +445,21 @@ fn fill_gutter_quads<R>(
 ) where
     R: text::Renderer<Font = iced::Font>,
 {
+    renderer.fill_quad(
+        renderer::Quad {
+            bounds: gutter_bounds,
+            ..Default::default()
+        },
+        palette.background.weaker.color,
+    );
     let lower_pair_bound = state.gutter_paragraphs.len() & !1;
     for i in (0..lower_pair_bound).step_by(2) {
         renderer.fill_quad(
             renderer::Quad {
                 bounds: iced::Rectangle {
                     x: gutter_bounds.x,
-                    y: gutter_bounds.y + i as f32 * state.cell_height,
-                    height: state.cell_height,
+                    y: gutter_bounds.y + i as f32 * state.body_cell_height,
+                    height: state.body_cell_height,
                     ..gutter_bounds
                 },
                 ..Default::default()
@@ -381,8 +471,8 @@ fn fill_gutter_quads<R>(
             renderer::Quad {
                 bounds: iced::Rectangle {
                     x: gutter_bounds.x,
-                    y: gutter_bounds.y + (i + 1) as f32 * state.cell_height,
-                    height: state.cell_height,
+                    y: gutter_bounds.y + (i + 1) as f32 * state.body_cell_height,
+                    height: state.body_cell_height,
                     ..gutter_bounds
                 },
                 ..Default::default()
@@ -395,13 +485,13 @@ fn fill_gutter_quads<R>(
             renderer::Quad {
                 bounds: iced::Rectangle {
                     x: gutter_bounds.x,
-                    y: gutter_bounds.y + (lower_pair_bound + 1) as f32 * state.cell_height,
-                    height: state.cell_height,
+                    y: gutter_bounds.y + lower_pair_bound as f32 * state.body_cell_height,
+                    height: state.body_cell_height,
                     ..gutter_bounds
                 },
                 ..Default::default()
             },
-            palette.background.weak.color,
+            palette.background.weaker.color,
         );
     }
 }
