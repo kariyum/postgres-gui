@@ -1,6 +1,8 @@
-use crate::components::connection_config::ConnectionConfig;
+use std::{rc::Rc, sync::Arc};
+
 use crate::db;
 use crate::types::QueryResult;
+use crate::{components::connection_config::ConnectionConfig, widgets};
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
@@ -17,7 +19,7 @@ pub struct EditorConfig {
     editor_pane: pane_grid::Pane,
     table_pane: Option<pane_grid::Pane>,
     pool: Option<sqlx::PgPool>,
-    result: Option<QueryResult>,
+    result: Option<Arc<QueryResult>>,
     error: Option<String>,
     running: bool,
     // database_keeper:
@@ -40,7 +42,7 @@ pub enum Message {
     Resized(pane_grid::ResizeEvent),
     QueryCompleted {
         pool: Option<sqlx::PgPool>,
-        result: Result<QueryResult, String>,
+        result: Result<Arc<QueryResult>, String>,
     },
 }
 
@@ -128,7 +130,10 @@ impl EditorConfig {
                         let result = db::execute_query(&pool, &sql).await;
                         (Some(pool), result)
                     },
-                    |(pool, result)| Message::QueryCompleted { pool, result },
+                    |(pool, result)| Message::QueryCompleted {
+                        pool,
+                        result: result.map(|r| Arc::new(r)),
+                    },
                 )
             }
         }
@@ -264,7 +269,7 @@ impl EditorConfig {
                     .padding(16)
                     .into()
             } else {
-                crate::widgets::table::Table::new(&result.columns, &result.rows).into()
+                widgets::table::Table::new(&result.columns, &result.rows).into()
             }
         } else if let Some(ref error) = self.error {
             container(text(error).size(13).color(crate::theme::DANGER))

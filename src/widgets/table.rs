@@ -105,8 +105,10 @@ where
     Col: TableColumn,
     Row: TableRow,
 {
+    #[instrument(skip_all)]
     pub fn new(columns: &'a [Col], rows: &'a [Row]) -> Self {
-        Self {
+        let start = Instant::now();
+        let res = Self {
             columns,
             rows,
             font: Font::MONOSPACE,
@@ -120,7 +122,9 @@ where
             gutter_width: 48.0,
             separator_width: 1.0,
             row_height: 24.0,
-        }
+        };
+        tracing::info!("took {:?}", start.elapsed());
+        res
     }
 
     fn layout<R>(&mut self, renderer: &R, limits: &Limits, state: &mut State<R::Paragraph>) -> Node
@@ -164,19 +168,27 @@ where
         let viewport_max_rows_count =
             (limits.max().height / state.body_cell_height).ceil() as usize;
 
-        for i in 1..=viewport_max_rows_count {
+        state.viewport_max_rows_count = viewport_max_rows_count;
+
+        for i in (1..state.gutter_paragraphs.len())
+            .skip(state.start_row_index * self.columns.len())
+            .take(viewport_max_rows_count * self.columns.len())
+        {
             state.gutter_paragraphs[i].update(text_config.with_content(&i.to_string()));
         }
 
-        eprintln!("start_row_index = {:?}", state.start_row_index);
+        eprintln!(
+            "start_row_index = {:?} viewport_max_rows_count = {viewport_max_rows_count}",
+            state.start_row_index
+        );
 
         for (i, cell) in self
             .rows
             .iter()
-            .take(viewport_max_rows_count)
             .flat_map(|row| row.cells())
             .enumerate()
-            .skip(state.start_row_index)
+            .skip(state.start_row_index * self.columns.len())
+            .take(viewport_max_rows_count * self.columns.len())
         {
             let text_config = Text {
                 content: cell.as_str(),
@@ -209,7 +221,12 @@ where
     ) where
         R: text::Renderer<Font = iced::Font>,
     {
-        for (i, cell) in state.gutter_paragraphs.iter().enumerate() {
+        for (i, cell) in state
+            .gutter_paragraphs
+            .iter()
+            .enumerate()
+            .take(state.viewport_max_rows_count)
+        {
             renderer.fill_paragraph(
                 cell.raw(),
                 Point {
@@ -233,6 +250,69 @@ where
         }
     }
 
+    fn fill_gutter_quads<R>(
+        &self,
+        gutter_bounds: iced::Rectangle,
+        state: &State<R::Paragraph>,
+        style: &TableStyle,
+        renderer: &mut R,
+    ) where
+        R: text::Renderer<Font = iced::Font>,
+    {
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: gutter_bounds,
+                ..Default::default()
+            },
+            style.gutter_color,
+        );
+        let lower_pair_bound = state.gutter_paragraphs.len() & !1;
+        for i in (1..lower_pair_bound)
+            .take(state.viewport_max_rows_count)
+            .step_by(2)
+        {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: iced::Rectangle {
+                        x: gutter_bounds.x,
+                        y: gutter_bounds.y + i as f32 * state.body_cell_height,
+                        height: state.body_cell_height,
+                        ..gutter_bounds
+                    },
+                    ..Default::default()
+                },
+                style.gutter_even_row_bg,
+            );
+
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: iced::Rectangle {
+                        x: gutter_bounds.x,
+                        y: gutter_bounds.y + (i + 1) as f32 * state.body_cell_height,
+                        height: state.body_cell_height,
+                        ..gutter_bounds
+                    },
+                    ..Default::default()
+                },
+                style.gutter_odd_row_bg,
+            );
+        }
+        if lower_pair_bound != state.gutter_paragraphs.len() {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: iced::Rectangle {
+                        x: gutter_bounds.x,
+                        y: gutter_bounds.y + lower_pair_bound as f32 * state.body_cell_height,
+                        height: state.body_cell_height,
+                        ..gutter_bounds
+                    },
+                    ..Default::default()
+                },
+                style.gutter_even_row_bg,
+            );
+        }
+    }
+
     fn draw_gutter<R>(
         &self,
         bounds: iced::Rectangle,
@@ -247,7 +327,7 @@ where
             ..bounds
         };
         renderer.with_layer(gutter_bounds, |renderer| {
-            fill_gutter_quads(gutter_bounds, state, &style, renderer);
+            self.fill_gutter_quads(gutter_bounds, state, &style, renderer);
             self.fill_gutter_paragraphs(gutter_bounds, state, &style, renderer);
         });
     }
@@ -322,7 +402,11 @@ where
             },
             style.odd_row_bg,
         );
-        for i in (0..self.rows.len()).step_by(2) {
+        for i in (0..self.rows.len())
+            .skip(state.start_row_index)
+            .take(state.viewport_max_rows_count)
+            .step_by(2)
+        {
             renderer.fill_quad(
                 Quad {
                     bounds: iced::Rectangle {
@@ -337,7 +421,13 @@ where
         }
         renderer.with_layer(body_bounds, |renderer| {
             let mut running_width_sum = 0.0;
-            for (i, cell) in state.body_paragraphs.iter().enumerate() {
+            for (i, cell) in state
+                .body_paragraphs
+                .iter()
+                .enumerate()
+                .skip(state.start_row_index * self.columns.len())
+                .take(state.viewport_max_rows_count * self.columns.len())
+            {
                 let cell_width =
                     state.header_paragraphs[i % state.header_paragraphs.len()].min_width();
                 let line_index = (i / self.columns.len()) as f32;
@@ -385,6 +475,7 @@ struct State<P: Paragraph> {
     body_width: f32,
     scroll_offset: Point<f32>,
     start_row_index: usize,
+    viewport_max_rows_count: usize,
 }
 
 #[derive(Debug, Default)]
@@ -410,6 +501,7 @@ impl<P: Paragraph> Default for State<P> {
             body_width: 0.0,
             scroll_offset: Point { x: 0.0, y: 0.0 },
             start_row_index: 0,
+            viewport_max_rows_count: 0,
         }
     }
 }
@@ -520,65 +612,6 @@ where
             }
             _ => (),
         }
-    }
-}
-
-fn fill_gutter_quads<R>(
-    gutter_bounds: iced::Rectangle,
-    state: &State<R::Paragraph>,
-    style: &TableStyle,
-    renderer: &mut R,
-) where
-    R: text::Renderer<Font = iced::Font>,
-{
-    renderer.fill_quad(
-        renderer::Quad {
-            bounds: gutter_bounds,
-            ..Default::default()
-        },
-        style.gutter_color,
-    );
-    let lower_pair_bound = state.gutter_paragraphs.len() & !1;
-    for i in (1..lower_pair_bound).step_by(2) {
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: iced::Rectangle {
-                    x: gutter_bounds.x,
-                    y: gutter_bounds.y + i as f32 * state.body_cell_height,
-                    height: state.body_cell_height,
-                    ..gutter_bounds
-                },
-                ..Default::default()
-            },
-            style.gutter_even_row_bg,
-        );
-
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: iced::Rectangle {
-                    x: gutter_bounds.x,
-                    y: gutter_bounds.y + (i + 1) as f32 * state.body_cell_height,
-                    height: state.body_cell_height,
-                    ..gutter_bounds
-                },
-                ..Default::default()
-            },
-            style.gutter_odd_row_bg,
-        );
-    }
-    if lower_pair_bound != state.gutter_paragraphs.len() {
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: iced::Rectangle {
-                    x: gutter_bounds.x,
-                    y: gutter_bounds.y + lower_pair_bound as f32 * state.body_cell_height,
-                    height: state.body_cell_height,
-                    ..gutter_bounds
-                },
-                ..Default::default()
-            },
-            style.gutter_even_row_bg,
-        );
     }
 }
 

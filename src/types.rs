@@ -23,7 +23,7 @@ impl crate::widgets::table::TableRow for ResultRow {
 }
 
 /// The full result of executing a query.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct QueryResult {
     pub columns: Vec<ResultColumn>,
     pub rows: Vec<ResultRow>,
