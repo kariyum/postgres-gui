@@ -36,6 +36,50 @@ impl Rectangle for iced::Rectangle {
     }
 }
 
+struct TableStyle {
+    header_bg: Color,
+    header_text: Color,
+    even_row_bg: Color,
+    odd_row_bg: Color,
+    row_text: Color,
+    gutter_color: Color,
+    gutter_even_row_bg: Color,
+    gutter_odd_row_bg: Color,
+}
+
+trait ColorExt {
+    fn darken(self, factor: f32) -> Color;
+}
+
+impl ColorExt for Color {
+    fn darken(self, amount: f32) -> Color {
+        let factor = (1.0 - amount).max(0.0);
+        Color {
+            r: self.r * factor,
+            g: self.g * factor,
+            b: self.b * factor,
+            a: self.a,
+        }
+    }
+}
+
+impl TableStyle {
+    fn from_theme(theme: &iced::Theme) -> Self {
+        let palette = theme.palette();
+
+        Self {
+            header_bg: palette.background.weak.color,
+            header_text: palette.background.weak.text,
+            even_row_bg: palette.background.weakest.color.darken(0.05),
+            gutter_even_row_bg: palette.background.weak.color.darken(0.15),
+            odd_row_bg: palette.background.weaker.color.darken(0.05),
+            gutter_odd_row_bg: palette.background.weak.color,
+            row_text: palette.background.weaker.text,
+            gutter_color: palette.background.strong.color,
+        }
+    }
+}
+
 pub struct Table<'a, Col, Row>
 where
     Col: TableColumn,
@@ -157,6 +201,7 @@ where
         &self,
         gutter_bounds: iced::Rectangle,
         state: &State<R::Paragraph>,
+        style: &TableStyle,
         renderer: &mut R,
     ) where
         R: text::Renderer<Font = iced::Font>,
@@ -170,7 +215,7 @@ where
                         + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
                         + self.padding_y,
                 },
-                Color::WHITE,
+                style.row_text,
                 iced::Rectangle {
                     x: gutter_bounds.x,
                     y: gutter_bounds.y
@@ -187,7 +232,7 @@ where
         &self,
         bounds: iced::Rectangle,
         state: &State<R::Paragraph>,
-        palette: &Palette,
+        style: &TableStyle,
         renderer: &mut R,
     ) where
         R: text::Renderer<Font = iced::Font>,
@@ -197,8 +242,8 @@ where
             ..bounds
         };
         renderer.with_layer(gutter_bounds, |renderer| {
-            fill_gutter_quads(gutter_bounds, state, palette, renderer);
-            self.fill_gutter_paragraphs(gutter_bounds, state, renderer);
+            fill_gutter_quads(gutter_bounds, state, &style, renderer);
+            self.fill_gutter_paragraphs(gutter_bounds, state, &style, renderer);
         });
     }
 
@@ -206,7 +251,7 @@ where
         &self,
         layout_bounds: iced::Rectangle,
         state: &State<R::Paragraph>,
-        palette: &Palette,
+        style: &TableStyle,
         renderer: &mut R,
     ) where
         R: text::Renderer<Font = iced::Font>,
@@ -222,7 +267,7 @@ where
                 bounds: header_bounds,
                 ..Default::default()
             },
-            palette.background.weaker.color,
+            style.header_bg,
         );
         renderer.with_layer(header_bounds, |renderer| {
             let mut running_width_sum = 0.0;
@@ -235,7 +280,7 @@ where
                             + self.padding_x,
                         y: header_bounds.y + self.padding_y,
                     },
-                    Color::WHITE,
+                    style.header_text,
                     iced::Rectangle {
                         x: header_bounds.x
                             + (running_width_sum + i as f32 * 2.0 * self.padding_x)
@@ -254,7 +299,7 @@ where
         &self,
         layout_bounds: iced::Rectangle,
         state: &State<R::Paragraph>,
-        palette: &Palette,
+        style: &TableStyle,
         renderer: &mut R,
     ) where
         R: text::Renderer<Font = iced::Font>,
@@ -270,7 +315,7 @@ where
                 bounds: body_bounds,
                 ..Default::default()
             },
-            palette.background.weaker.color,
+            style.odd_row_bg,
         );
         for i in (0..self.rows.len()).step_by(2) {
             renderer.fill_quad(
@@ -282,7 +327,7 @@ where
                     },
                     ..Default::default()
                 },
-                palette.background.weak.color,
+                style.even_row_bg,
             );
         }
         renderer.with_layer(body_bounds, |renderer| {
@@ -298,7 +343,7 @@ where
                 renderer.fill_paragraph(
                     cell.raw(),
                     Point { x, y },
-                    Color::WHITE,
+                    style.row_text,
                     iced::Rectangle {
                         x,
                         y,
@@ -405,11 +450,11 @@ where
         _viewport: &iced::Rectangle,
     ) {
         let state = tree.state.downcast_ref::<State<R::Paragraph>>();
-        let palette = theme.palette();
+        let style = TableStyle::from_theme(theme);
         renderer.with_layer(layout.bounds(), |renderer| {
-            self.draw_gutter(layout.bounds(), state, palette, renderer);
-            self.draw_header(layout.bounds(), state, palette, renderer);
-            self.draw_body(layout.bounds(), state, palette, renderer);
+            self.draw_gutter(layout.bounds(), state, &style, renderer);
+            self.draw_header(layout.bounds(), state, &style, renderer);
+            self.draw_body(layout.bounds(), state, &style, renderer);
         });
     }
 
@@ -429,7 +474,7 @@ where
 fn fill_gutter_quads<R>(
     gutter_bounds: iced::Rectangle,
     state: &State<R::Paragraph>,
-    palette: &Palette,
+    style: &TableStyle,
     renderer: &mut R,
 ) where
     R: text::Renderer<Font = iced::Font>,
@@ -439,10 +484,10 @@ fn fill_gutter_quads<R>(
             bounds: gutter_bounds,
             ..Default::default()
         },
-        palette.background.weaker.color,
+        style.gutter_color,
     );
     let lower_pair_bound = state.gutter_paragraphs.len() & !1;
-    for i in (0..lower_pair_bound).step_by(2) {
+    for i in (1..lower_pair_bound).step_by(2) {
         renderer.fill_quad(
             renderer::Quad {
                 bounds: iced::Rectangle {
@@ -453,7 +498,7 @@ fn fill_gutter_quads<R>(
                 },
                 ..Default::default()
             },
-            palette.background.weaker.color,
+            style.gutter_even_row_bg,
         );
 
         renderer.fill_quad(
@@ -466,7 +511,7 @@ fn fill_gutter_quads<R>(
                 },
                 ..Default::default()
             },
-            palette.background.weak.color,
+            style.gutter_odd_row_bg,
         );
     }
     if lower_pair_bound != state.gutter_paragraphs.len() {
@@ -480,7 +525,7 @@ fn fill_gutter_quads<R>(
                 },
                 ..Default::default()
             },
-            palette.background.weaker.color,
+            style.gutter_even_row_bg,
         );
     }
 }
