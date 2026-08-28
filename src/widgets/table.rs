@@ -105,10 +105,8 @@ where
     Col: TableColumn,
     Row: TableRow,
 {
-    #[instrument(skip_all)]
     pub fn new(columns: &'a [Col], rows: &'a [Row]) -> Self {
-        let start = Instant::now();
-        let res = Self {
+        Self {
             columns,
             rows,
             font: Font::MONOSPACE,
@@ -122,9 +120,7 @@ where
             gutter_width: 48.0,
             separator_width: 1.0,
             row_height: 24.0,
-        };
-        tracing::info!("took {:?}", start.elapsed());
-        res
+        }
     }
 
     fn layout<R>(&mut self, renderer: &R, limits: &Limits, state: &mut State<R::Paragraph>) -> Node
@@ -171,16 +167,11 @@ where
         state.viewport_max_rows_count = viewport_max_rows_count;
 
         for i in (1..state.gutter_paragraphs.len())
-            .skip(state.start_row_index * self.columns.len())
-            .take(viewport_max_rows_count * self.columns.len())
+            .skip(state.start_row_index)
+            .take(viewport_max_rows_count)
         {
             state.gutter_paragraphs[i].update(text_config.with_content(&i.to_string()));
         }
-
-        eprintln!(
-            "start_row_index = {:?} viewport_max_rows_count = {viewport_max_rows_count}",
-            state.start_row_index
-        );
 
         for (i, cell) in self
             .rows
@@ -221,33 +212,57 @@ where
     ) where
         R: text::Renderer<Font = iced::Font>,
     {
-        for (i, cell) in state
-            .gutter_paragraphs
-            .iter()
-            .enumerate()
-            .take(state.viewport_max_rows_count)
-        {
-            renderer.fill_paragraph(
-                cell.raw(),
-                Point {
-                    x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
-                    y: gutter_bounds.y
-                        + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
-                        + self.padding_y
-                        - state.scroll_offset.y,
-                },
-                style.row_text,
-                iced::Rectangle {
-                    x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
-                    y: gutter_bounds.y
-                        + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
-                        + self.padding_y
-                        - state.scroll_offset.y,
-                    width: cell.min_bounds().width + 2.0 * self.padding_x,
-                    height: cell.min_bounds().height + 2.0 * self.padding_y,
-                },
-            );
-        }
+        let cell = &state.gutter_paragraphs[0];
+        renderer.fill_paragraph(
+            cell.raw(),
+            Point {
+                x: gutter_bounds.x + self.padding_x,
+                y: gutter_bounds.y + self.padding_y,
+            },
+            style.row_text,
+            iced::Rectangle {
+                x: gutter_bounds.x + self.padding_x,
+                y: gutter_bounds.y + self.padding_y,
+                width: cell.min_bounds().width + 2.0 * self.padding_x,
+                height: cell.min_bounds().height + 2.0 * self.padding_y,
+            },
+        );
+        let body_bounds = iced::Rectangle {
+            y: gutter_bounds.y + state.header_height,
+            height: gutter_bounds.height - state.header_height,
+            ..gutter_bounds
+        };
+
+        renderer.with_layer(body_bounds, |renderer| {
+            for (i, cell) in state
+                .gutter_paragraphs
+                .iter()
+                .enumerate()
+                .skip(state.start_row_index + 1)
+                .take(state.viewport_max_rows_count)
+            {
+                renderer.fill_paragraph(
+                    cell.raw(),
+                    Point {
+                        x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
+                        y: gutter_bounds.y
+                            + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
+                            + self.padding_y
+                            - state.scroll_offset.y,
+                    },
+                    style.row_text,
+                    iced::Rectangle {
+                        x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
+                        y: gutter_bounds.y
+                            + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
+                            + self.padding_y
+                            - state.scroll_offset.y,
+                        width: cell.min_bounds().width + 2.0 * self.padding_x,
+                        height: cell.min_bounds().height + 2.0 * self.padding_y,
+                    },
+                );
+            }
+        });
     }
 
     fn fill_gutter_quads<R>(
@@ -261,56 +276,47 @@ where
     {
         renderer.fill_quad(
             renderer::Quad {
-                bounds: gutter_bounds,
+                bounds: iced::Rectangle {
+                    height: state.header_height,
+                    ..gutter_bounds
+                },
                 ..Default::default()
             },
             style.gutter_color,
         );
-        let lower_pair_bound = state.gutter_paragraphs.len() & !1;
-        for i in (1..lower_pair_bound)
-            .take(state.viewport_max_rows_count)
-            .step_by(2)
-        {
+        let body_bounds = iced::Rectangle {
+            y: gutter_bounds.y + state.header_height,
+            height: gutter_bounds.height - state.header_height,
+            ..gutter_bounds
+        };
+        renderer.with_layer(body_bounds, |renderer| {
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds: iced::Rectangle {
-                        x: gutter_bounds.x,
-                        y: gutter_bounds.y + i as f32 * state.body_cell_height,
-                        height: state.body_cell_height,
-                        ..gutter_bounds
-                    },
-                    ..Default::default()
-                },
-                style.gutter_even_row_bg,
-            );
-
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: iced::Rectangle {
-                        x: gutter_bounds.x,
-                        y: gutter_bounds.y + (i + 1) as f32 * state.body_cell_height,
-                        height: state.body_cell_height,
-                        ..gutter_bounds
-                    },
+                    bounds: body_bounds,
                     ..Default::default()
                 },
                 style.gutter_odd_row_bg,
             );
-        }
-        if lower_pair_bound != state.gutter_paragraphs.len() {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: iced::Rectangle {
-                        x: gutter_bounds.x,
-                        y: gutter_bounds.y + lower_pair_bound as f32 * state.body_cell_height,
-                        height: state.body_cell_height,
-                        ..gutter_bounds
+            for i in (0..state.gutter_paragraphs.len())
+                .skip(state.start_row_index)
+                .take(state.viewport_max_rows_count)
+                .filter(|i| (i >> 0) & 1 == 1)
+            {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: iced::Rectangle {
+                            x: body_bounds.x,
+                            y: body_bounds.y + i as f32 * state.body_cell_height
+                                - state.scroll_offset.y,
+                            height: state.body_cell_height,
+                            ..body_bounds
+                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
-                },
-                style.gutter_even_row_bg,
-            );
-        }
+                    style.gutter_even_row_bg,
+                );
+            }
+        });
     }
 
     fn draw_gutter<R>(
@@ -395,31 +401,33 @@ where
             width: layout_bounds.width - GUTTER_WIDTH,
             height: layout_bounds.height - state.header_height,
         };
-        renderer.fill_quad(
-            Quad {
-                bounds: body_bounds,
-                ..Default::default()
-            },
-            style.odd_row_bg,
-        );
-        for i in (0..self.rows.len())
-            .skip(state.start_row_index)
-            .take(state.viewport_max_rows_count)
-            .step_by(2)
-        {
+
+        renderer.with_layer(body_bounds, |renderer| {
             renderer.fill_quad(
                 Quad {
-                    bounds: iced::Rectangle {
-                        y: body_bounds.y + i as f32 * state.body_cell_height,
-                        height: state.body_cell_height,
-                        ..body_bounds
-                    },
+                    bounds: body_bounds,
                     ..Default::default()
                 },
-                style.even_row_bg,
+                style.odd_row_bg,
             );
-        }
-        renderer.with_layer(body_bounds, |renderer| {
+            for i in (0..self.rows.len())
+                .skip(state.start_row_index)
+                .take(state.viewport_max_rows_count)
+                .filter(|i| (i >> 0) & 1 == 1)
+            {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: iced::Rectangle {
+                            y: body_bounds.y + i as f32 * state.body_cell_height
+                                - state.scroll_offset.y,
+                            height: state.body_cell_height,
+                            ..body_bounds
+                        },
+                        ..Default::default()
+                    },
+                    style.even_row_bg,
+                );
+            }
             let mut running_width_sum = 0.0;
             for (i, cell) in state
                 .body_paragraphs
@@ -600,11 +608,6 @@ where
 
                 state.start_row_index =
                     (state.scroll_offset.y / state.body_cell_height).floor() as usize;
-
-                eprintln!(
-                    "scroll_offset_x = {:?}, body_cell_height = {:?}",
-                    state.scroll_offset.y, state.body_cell_height
-                );
 
                 shell.capture_event();
                 shell.invalidate_layout();
