@@ -168,12 +168,15 @@ where
             state.gutter_paragraphs[i].update(text_config.with_content(&i.to_string()));
         }
 
+        eprintln!("start_row_index = {:?}", state.start_row_index);
+
         for (i, cell) in self
             .rows
             .iter()
             .take(viewport_max_rows_count)
             .flat_map(|row| row.cells())
             .enumerate()
+            .skip(state.start_row_index)
         {
             let text_config = Text {
                 content: cell.as_str(),
@@ -210,17 +213,19 @@ where
             renderer.fill_paragraph(
                 cell.raw(),
                 Point {
-                    x: gutter_bounds.x + self.padding_x,
+                    x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
                     y: gutter_bounds.y
                         + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
-                        + self.padding_y,
+                        + self.padding_y
+                        - state.scroll_offset.y,
                 },
                 style.row_text,
                 iced::Rectangle {
-                    x: gutter_bounds.x,
+                    x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
                     y: gutter_bounds.y
                         + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
-                        + self.padding_y,
+                        + self.padding_y
+                        - state.scroll_offset.y,
                     width: cell.min_bounds().width + 2.0 * self.padding_x,
                     height: cell.min_bounds().height + 2.0 * self.padding_y,
                 },
@@ -338,8 +343,10 @@ where
                 let line_index = (i / self.columns.len()) as f32;
                 let x = body_bounds.x
                     + (running_width_sum + (i % self.columns.len()) as f32 * 2.0 * self.padding_x)
-                    + self.padding_x;
-                let y = body_bounds.y + line_index * state.body_cell_height + self.padding_y;
+                    + self.padding_x
+                    - state.scroll_offset.x;
+                let y = body_bounds.y + line_index * state.body_cell_height + self.padding_y
+                    - state.scroll_offset.y;
                 renderer.fill_paragraph(
                     cell.raw(),
                     Point { x, y },
@@ -376,6 +383,8 @@ struct State<P: Paragraph> {
     body_cell_height: f32,
     header_height: f32,
     body_width: f32,
+    scroll_offset: Point<f32>,
+    start_row_index: usize,
 }
 
 #[derive(Debug, Default)]
@@ -399,6 +408,8 @@ impl<P: Paragraph> Default for State<P> {
             body_cell_height: 0.0,
             header_height: 0.0,
             body_width: 0.0,
+            scroll_offset: Point { x: 0.0, y: 0.0 },
+            start_row_index: 0,
         }
     }
 }
@@ -468,6 +479,47 @@ where
         shell: &mut Shell<'_, Message>,
         _viewport: &iced::Rectangle,
     ) {
+        let state = tree.state.downcast_mut::<State<R::Paragraph>>();
+        let bounds = layout.bounds();
+
+        match event {
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                if shell.is_event_captured() || !cursor.is_over(bounds) {
+                    return;
+                }
+
+                let (dx, dy) = match delta {
+                    mouse::ScrollDelta::Lines { x, y } => {
+                        let (x, y) = if state.keyboard_modifiers.shift() {
+                            (y, x)
+                        } else {
+                            (x, y)
+                        };
+
+                        (-x * 40.0, -y * state.body_cell_height)
+                    }
+                    mouse::ScrollDelta::Pixels { x, y } => (-x, -y),
+                };
+
+                state.scroll_offset = Point {
+                    x: state.scroll_offset.x + dx,
+                    y: state.scroll_offset.y + dy,
+                };
+
+                state.start_row_index =
+                    (state.scroll_offset.y / state.body_cell_height).floor() as usize;
+
+                eprintln!(
+                    "scroll_offset_x = {:?}, body_cell_height = {:?}",
+                    state.scroll_offset.y, state.body_cell_height
+                );
+
+                shell.capture_event();
+                shell.invalidate_layout();
+                shell.request_redraw();
+            }
+            _ => (),
+        }
     }
 }
 
