@@ -114,11 +114,23 @@ where
         state.gutter_paragraphs[0].update(text_config.with_content("#"));
         state.header_height = state.gutter_paragraphs[0].min_height() + 2.0 * self.padding_y;
 
-        for i in 1..=self.rows.len() {
+        state.text_height = state.gutter_paragraphs[0].min_height();
+        state.body_cell_height = state.text_height + 2.0 * self.padding_y;
+
+        let viewport_max_rows_count =
+            (limits.max().height / state.body_cell_height).ceil() as usize;
+
+        for i in 1..=viewport_max_rows_count {
             state.gutter_paragraphs[i].update(text_config.with_content(&i.to_string()));
         }
 
-        for (i, cell) in self.rows.iter().flat_map(|row| row.cells()).enumerate() {
+        for (i, cell) in self
+            .rows
+            .iter()
+            .take(viewport_max_rows_count)
+            .flat_map(|row| row.cells())
+            .enumerate()
+        {
             let text_config = Text {
                 content: cell.as_str(),
                 bounds: Size {
@@ -137,9 +149,6 @@ where
             };
             state.body_paragraphs[i].update(text_config);
         }
-
-        state.text_height = state.body_paragraphs[0].min_height();
-        state.body_cell_height = state.text_height + 2.0 * self.padding_y;
 
         Node::new(limits.max())
     }
@@ -353,26 +362,6 @@ impl<P: Paragraph> Default for State<P> {
 enum Axis {
     Vertical,
     Horizontal,
-}
-
-#[instrument(skip_all, fields(len = %rows_len))]
-fn compute_gutter_paragraphs<P>(
-    rows_len: usize,
-    text_config: Text<&str, <P as Paragraph>::Font>,
-) -> Vec<Plain<P>>
-where
-    P: Paragraph,
-    P::Font: std::fmt::Debug,
-{
-    let start = Instant::now();
-    let mut gutter_paragraphs = Vec::with_capacity(rows_len + 1);
-    gutter_paragraphs.resize_with(rows_len + 1, Plain::<P>::default);
-    gutter_paragraphs[0].update(text_config.with_content("#"));
-    for i in 1..=rows_len {
-        gutter_paragraphs[i].update(text_config.with_content(&i.to_string()));
-    }
-    tracing::info!("took {:?}", start.elapsed());
-    gutter_paragraphs
 }
 
 impl<'a, Message, R, Col, Row> Widget<Message, iced::Theme, R> for Table<'a, Col, Row>
