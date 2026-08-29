@@ -7,15 +7,16 @@ use iced::advanced::renderer::{self, Quad};
 use iced::advanced::text::paragraph::Plain;
 use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::widget::{self, Tree, Widget};
-use iced::advanced::{Renderer, Shell};
+use iced::advanced::Shell;
 use iced::alignment;
-use iced::theme::Palette;
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Size, keyboard, window};
 use tracing::instrument;
 
 const GUTTER_WIDTH: f32 = 48.0;
 const SCROLLBAR_WIDTH: f32 = 5.0;
 const MIN_SCROLLER: f32 = 24.0;
+const SCROLL_LERP_FACTOR: f32 = 0.12;
+const SCROLL_EPSILON: f32 = 0.5;
 
 pub trait TableColumn {
     /// The header text of this column.
@@ -477,11 +478,13 @@ struct State<P: Paragraph> {
     vertical_scroll_position: ScrollPosition,
     keyboard_modifiers: keyboard::Modifiers,
     dragging: Option<Drag>,
-    text_height: f32, // can be needed for cotent rect
+    text_height: f32,
     body_cell_height: f32,
     header_height: f32,
     body_width: f32,
     scroll_offset: Point<f32>,
+    scroll_target: Point<f32>,
+    last_frame: Option<Instant>,
     start_row_index: usize,
     viewport_max_rows_count: usize,
 }
@@ -508,6 +511,8 @@ impl<P: Paragraph> Default for State<P> {
             header_height: 0.0,
             body_width: 0.0,
             scroll_offset: Point { x: 0.0, y: 0.0 },
+            scroll_target: Point { x: 0.0, y: 0.0 },
+            last_frame: None,
             start_row_index: 0,
             viewport_max_rows_count: 0,
         }
@@ -601,9 +606,9 @@ where
                     mouse::ScrollDelta::Pixels { x, y } => (-x, -y),
                 };
 
-                state.scroll_offset = Point {
-                    x: state.scroll_offset.x + dx,
-                    y: state.scroll_offset.y + dy,
+                state.scroll_target = Point {
+                    x: state.scroll_target.x + dx,
+                    y: state.scroll_target.y + dy,
                 };
 
                 state.start_row_index =
@@ -612,6 +617,54 @@ where
                 shell.capture_event();
                 shell.invalidate_layout();
                 shell.request_redraw();
+                shell.capture_event();
+            }
+            Event::Window(window::Event::RedrawRequested(instant)) => {
+                if state.scroll_offset != state.scroll_target {
+                    let elapsed = state
+                        .last_frame
+                        .map(|prev| instant.duration_since(prev).as_secs_f32())
+                        .unwrap_or(0.016)
+                        .min(0.1);
+
+                    let decay = (-SCROLL_LERP_FACTOR * elapsed * 60.0).exp();
+
+                    let new_x = state.scroll_target.x
+                        + (state.scroll_offset.x - state.scroll_target.x) * decay;
+                    let new_y = state.scroll_target.y
+                        + (state.scroll_offset.y - state.scroll_target.y) * decay;
+
+                    let reached_x = (new_x - state.scroll_target.x).abs() < SCROLL_EPSILON;
+                    let reached_y = (new_y - state.scroll_target.y).abs() < SCROLL_EPSILON;
+
+                    state.scroll_offset.x = if reached_x {
+                        state.scroll_target.x
+                    } else {
+                        new_x
+                    };
+                    state.scroll_offset.y = if reached_y {
+                        state.scroll_target.y
+                    } else {
+                        new_y
+                    };
+
+                    let old_start = state.start_row_index;
+                    state.start_row_index =
+                        (state.scroll_offset.y / state.body_cell_height).floor() as usize;
+
+                    if old_start != state.start_row_index {
+                        shell.invalidate_layout();
+                    }
+
+                    if !reached_x || !reached_y {
+                        shell.request_redraw();
+                        state.last_frame = Some(*instant);
+                    } else {
+                        state.last_frame = None;
+                    }
+                } else {
+                    state.last_frame = None;
+                }
             }
             _ => (),
         }
