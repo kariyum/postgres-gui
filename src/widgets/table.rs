@@ -153,8 +153,17 @@ where
 
         for (i, col) in self.columns.iter().enumerate() {
             state.header_paragraphs[i].update(text_config.with_content(col.name()));
-            state.body_width += state.header_paragraphs[i].min_width();
         }
+
+        if state.column_widths.len() != self.columns.len() {
+            state.column_widths = state
+                .header_paragraphs
+                .iter()
+                .map(|header_cell| header_cell.min_width())
+                .collect();
+        }
+
+        state.body_width = state.column_widths.iter().sum();
 
         state.gutter_paragraphs[0].update(text_config.with_content("#"));
         state.header_height = state.gutter_paragraphs[0].min_height() + 2.0 * self.padding_y;
@@ -184,11 +193,9 @@ where
             y: state.scroll_offset.y.clamp(0.0, state.max_scroll_offset.y),
         };
 
-        state.start_row_index =
-            (state.scroll_offset.y / state.body_cell_height).floor() as usize;
+        state.start_row_index = (state.scroll_offset.y / state.body_cell_height).floor() as usize;
 
-        let viewport_max_rows_count =
-            (viewport.height / state.body_cell_height).ceil() as usize;
+        let viewport_max_rows_count = (viewport.height / state.body_cell_height).ceil() as usize;
 
         state.viewport_max_rows_count = viewport_max_rows_count;
 
@@ -210,7 +217,7 @@ where
             let text_config = Text {
                 content: cell.as_str(),
                 bounds: Size {
-                    width: state.header_paragraphs[i % state.header_paragraphs.len()].min_width(),
+                    width: state.column_widths[i % state.column_widths.len()],
                     ..limits.max()
                 },
                 size: Pixels(12.0),
@@ -388,7 +395,12 @@ where
         );
         renderer.with_layer(header_bounds, |renderer| {
             let mut running_width_sum = 0.0;
-            for (i, col) in state.header_paragraphs.iter().enumerate() {
+            for (i, (col, col_width)) in state
+                .header_paragraphs
+                .iter()
+                .zip(&state.column_widths)
+                .enumerate()
+            {
                 renderer.fill_paragraph(
                     col.raw(),
                     Point {
@@ -405,11 +417,11 @@ where
                             + self.padding_x
                             - state.scroll_offset.x,
                         y: header_bounds.y + self.padding_y,
-                        width: col.min_width() + 2.0 * self.padding_x,
+                        width: col_width + 2.0 * self.padding_x,
                         height: state.header_height,
                     },
                 );
-                running_width_sum += col.min_width();
+                running_width_sum += col_width;
             }
         });
     }
@@ -464,11 +476,11 @@ where
                 .skip(state.start_row_index * self.columns.len())
                 .take(state.viewport_max_rows_count * self.columns.len())
             {
-                let cell_width =
-                    state.header_paragraphs[i % state.header_paragraphs.len()].min_width();
+                let col_idx = i % self.columns.len();
+                let cell_width = state.column_widths[col_idx];
                 let line_index = (i / self.columns.len()) as f32;
                 let x = body_bounds.x
-                    + (running_width_sum + (i % self.columns.len()) as f32 * 2.0 * self.padding_x)
+                    + (running_width_sum + col_idx as f32 * 2.0 * self.padding_x)
                     + self.padding_x
                     - state.scroll_offset.x;
                 let y = body_bounds.y + line_index * state.body_cell_height + self.padding_y
@@ -568,11 +580,10 @@ where
         });
 
         let mut running_width_sum = 0.0;
-        for (i, col) in state.header_paragraphs.iter().enumerate() {
-            running_width_sum += col.min_width();
+        for (i, _col) in state.header_paragraphs.iter().enumerate() {
+            running_width_sum += state.column_widths[i];
             let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
 
-            // Draw body column separator (moves with horizontal scroll)
             let body_x = body_bounds.x + boundary_x - state.scroll_offset.x;
             renderer.with_layer(body_bounds, |renderer| {
                 renderer.fill_quad(
@@ -610,14 +621,18 @@ where
 
 #[derive(Debug, Clone, Copy)]
 enum Drag {
-    Vertical(f32),
-    Horizontal(f32),
+    ColumnResize {
+        col_index: usize,
+        start_x: f32,
+        start_width: f32,
+    },
 }
 
 struct State<P: Paragraph> {
     header_paragraphs: Vec<Plain<P>>,
     body_paragraphs: Vec<Plain<P>>,
     gutter_paragraphs: Vec<Plain<P>>,
+    column_widths: Vec<f32>,
     previous_limits: Option<Limits>,
     horizontal_scroll_position: ScrollPosition,
     vertical_scroll_position: ScrollPosition,
@@ -652,6 +667,7 @@ impl<P: Paragraph> Default for State<P> {
             header_paragraphs: Vec::new(),
             body_paragraphs: Vec::new(),
             gutter_paragraphs: Vec::new(),
+            column_widths: Vec::new(),
             text_height: 0.0,
             body_cell_height: 0.0,
             header_height: 0.0,
@@ -722,6 +738,42 @@ where
         });
     }
 
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &iced::Rectangle,
+        _renderer: &R,
+    ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<State<R::Paragraph>>();
+        let bounds = layout.bounds();
+
+        if let Some(position) = cursor.position_in(bounds) {
+            if let Some(Drag::ColumnResize { .. }) = state.dragging {
+                return mouse::Interaction::ResizingHorizontally;
+            }
+
+            let mut running_width_sum = 0.0;
+            for i in 0..self.columns.len() {
+                let col_width = if i < state.column_widths.len() {
+                    state.column_widths[i]
+                } else {
+                    return mouse::Interaction::None;
+                };
+                running_width_sum += col_width;
+                let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
+                let separator_x = bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
+
+                if (position.x - separator_x).abs() <= 5.0 {
+                    return mouse::Interaction::ResizingHorizontally;
+                }
+            }
+        }
+
+        mouse::Interaction::None
+    }
+
     fn update(
         &mut self,
         tree: &mut Tree,
@@ -736,6 +788,60 @@ where
         let bounds = layout.bounds();
 
         match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(position) = cursor.position_in(bounds) {
+                    let mut running_width_sum = 0.0;
+                    for i in 0..self.columns.len() {
+                        let col_width = state.column_widths[i];
+                        running_width_sum += col_width;
+                        let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
+                        let separator_x =
+                            bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
+
+                        if (position.x - separator_x).abs() <= 5.0 {
+                            state.dragging = Some(Drag::ColumnResize {
+                                col_index: i,
+                                start_x: position.x,
+                                start_width: col_width,
+                            });
+                            shell.capture_event();
+                            return;
+                        }
+                    }
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Some(Drag::ColumnResize { .. }) = state.dragging {
+                    state.dragging = None;
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if let Some(Drag::ColumnResize {
+                    col_index,
+                    start_x,
+                    start_width,
+                }) = state.dragging
+                {
+                    let delta_x = position.x - start_x;
+                    let min_width = state.header_paragraphs[col_index].min_width();
+                    let new_width = (start_width + delta_x).max(min_width);
+                    state.column_widths[col_index] = new_width;
+
+                    state.body_width = state.column_widths.iter().sum();
+                    let total_padding = self.columns.len() as f32 * 2.0 * self.padding_x;
+                    state.max_scroll_offset.x =
+                        (state.body_width + total_padding - (bounds.width - GUTTER_WIDTH)).max(0.0);
+                    state.scroll_target.x =
+                        state.scroll_target.x.clamp(0.0, state.max_scroll_offset.x);
+                    state.scroll_offset.x =
+                        state.scroll_offset.x.clamp(0.0, state.max_scroll_offset.x);
+
+                    shell.invalidate_layout();
+                    shell.request_redraw();
+                    shell.capture_event();
+                }
+            }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 if shell.is_event_captured() || !cursor.is_over(bounds) {
                     return;
