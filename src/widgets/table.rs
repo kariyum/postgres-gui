@@ -1,13 +1,13 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::time::Instant;
 
+use iced::advanced::Shell;
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::mouse;
 use iced::advanced::renderer::{self, Quad};
 use iced::advanced::text::paragraph::Plain;
 use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::widget::{self, Tree, Widget};
-use iced::advanced::Shell;
 use iced::alignment;
 use iced::{Color, Element, Event, Font, Length, Pixels, Point, Size, keyboard, window};
 use tracing::instrument;
@@ -16,7 +16,7 @@ const GUTTER_WIDTH: f32 = 48.0;
 const SCROLLBAR_WIDTH: f32 = 5.0;
 const MIN_SCROLLER: f32 = 24.0;
 const SCROLL_LERP_FACTOR: f32 = 0.12;
-const SCROLL_EPSILON: f32 = 0.5;
+const SCROLL_EPSILON: f32 = 0.01;
 
 pub trait TableColumn {
     /// The header text of this column.
@@ -46,6 +46,7 @@ struct TableStyle {
     gutter_color: Color,
     gutter_even_row_bg: Color,
     gutter_odd_row_bg: Color,
+    separator_color: Color,
 }
 
 trait ColorExt {
@@ -77,6 +78,7 @@ impl TableStyle {
             gutter_odd_row_bg: palette.background.weak.color,
             row_text: palette.background.weaker.text,
             gutter_color: palette.background.strong.color,
+            separator_color: palette.background.strong.color,
         }
     }
 }
@@ -98,7 +100,6 @@ where
     min_col_width: f32,
     max_col_width: f32,
     separator_width: f32,
-    row_height: f32,
 }
 
 impl<'a, Col, Row> Table<'a, Col, Row>
@@ -120,7 +121,6 @@ where
             height: Length::Shrink,
             gutter_width: 48.0,
             separator_width: 1.0,
-            row_height: 24.0,
         }
     }
 
@@ -461,6 +461,124 @@ where
             }
         });
     }
+
+    fn draw_separators<R>(
+        &self,
+        bounds: iced::Rectangle,
+        state: &State<R::Paragraph>,
+        style: &TableStyle,
+        renderer: &mut R,
+    ) where
+        R: text::Renderer<Font = iced::Font>,
+    {
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: iced::Rectangle {
+                    x: bounds.x,
+                    y: bounds.y + state.header_height,
+                    width: bounds.width,
+                    height: 1.0,
+                },
+                ..Default::default()
+            },
+            style.separator_color,
+        );
+
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: iced::Rectangle {
+                    x: bounds.x + GUTTER_WIDTH - 1.0,
+                    y: bounds.y,
+                    width: 1.0,
+                    height: bounds.height,
+                },
+                ..Default::default()
+            },
+            style.separator_color,
+        );
+
+        let scrollable_bounds = iced::Rectangle {
+            x: bounds.x,
+            y: bounds.y + state.header_height,
+            width: bounds.width,
+            height: bounds.height - state.header_height,
+        };
+
+        let body_bounds = iced::Rectangle {
+            x: bounds.x + GUTTER_WIDTH,
+            y: bounds.y + state.header_height,
+            width: bounds.width - GUTTER_WIDTH,
+            height: bounds.height - state.header_height,
+        };
+
+        let header_bounds = iced::Rectangle {
+            x: bounds.x + GUTTER_WIDTH,
+            y: bounds.y,
+            width: bounds.width - GUTTER_WIDTH,
+            height: state.header_height,
+        };
+
+        renderer.with_layer(scrollable_bounds, |renderer| {
+            for i in (0..self.rows.len())
+                .skip(state.start_row_index)
+                .take(state.viewport_max_rows_count + 1)
+            {
+                let y = scrollable_bounds.y + (i + 1) as f32 * state.body_cell_height
+                    - state.scroll_offset.y;
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: iced::Rectangle {
+                            x: scrollable_bounds.x,
+                            y,
+                            width: scrollable_bounds.width,
+                            height: 1.0,
+                        },
+                        ..Default::default()
+                    },
+                    style.separator_color,
+                );
+            }
+        });
+
+        let mut running_width_sum = 0.0;
+        for (i, col) in state.header_paragraphs.iter().enumerate() {
+            running_width_sum += col.min_width();
+            let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
+
+            // Draw body column separator (moves with horizontal scroll)
+            let body_x = body_bounds.x + boundary_x - state.scroll_offset.x;
+            renderer.with_layer(body_bounds, |renderer| {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: iced::Rectangle {
+                            x: body_x,
+                            y: body_bounds.y,
+                            width: 1.0,
+                            height: body_bounds.height,
+                        },
+                        ..Default::default()
+                    },
+                    style.separator_color,
+                );
+            });
+
+            let header_x = header_bounds.x + boundary_x;
+            renderer.with_layer(header_bounds, |renderer| {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: iced::Rectangle {
+                            x: header_x,
+                            y: header_bounds.y,
+                            width: 1.0,
+                            height: header_bounds.height,
+                        },
+                        ..Default::default()
+                    },
+                    style.separator_color,
+                );
+            });
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -571,6 +689,7 @@ where
             self.draw_gutter(layout.bounds(), state, &style, renderer);
             self.draw_header(layout.bounds(), state, &style, renderer);
             self.draw_body(layout.bounds(), state, &style, renderer);
+            self.draw_separators(layout.bounds(), state, &style, renderer)
         });
     }
 
@@ -614,8 +733,6 @@ where
                 state.start_row_index =
                     (state.scroll_offset.y / state.body_cell_height).floor() as usize;
 
-                shell.capture_event();
-                shell.invalidate_layout();
                 shell.request_redraw();
                 shell.capture_event();
             }
