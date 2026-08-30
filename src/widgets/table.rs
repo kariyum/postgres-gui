@@ -646,6 +646,7 @@ struct State<P: Paragraph> {
     scroll_target: Point<f32>,
     max_scroll_offset: Point<f32>,
     last_frame: Option<Instant>,
+    last_click: Option<(Point, Instant)>,
     start_row_index: usize,
     viewport_max_rows_count: usize,
 }
@@ -676,6 +677,7 @@ impl<P: Paragraph> Default for State<P> {
             scroll_target: Point { x: 0.0, y: 0.0 },
             max_scroll_offset: Point { x: 0.0, y: 0.0 },
             last_frame: None,
+            last_click: None,
             start_row_index: 0,
             viewport_max_rows_count: 0,
         }
@@ -714,7 +716,7 @@ where
         let state = tree.state.downcast_mut::<State<R::Paragraph>>();
         let start = Instant::now();
         let node = self.layout(renderer, limits, state);
-        tracing::info!("took {:?}", start.elapsed());
+        // tracing::info!("took {:?}", start.elapsed());
         node
     }
 
@@ -790,6 +792,49 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_in(bounds) {
+                    let now = Instant::now();
+                    let is_double_click = if let Some((last_pos, last_time)) = state.last_click {
+                        last_pos.distance(position) < 5.0 && (now - last_time).as_millis() <= 300
+                    } else {
+                        false
+                    };
+                    state.last_click = Some((position, now));
+                    if is_double_click {
+                        if position.x >= GUTTER_WIDTH && position.y >= state.header_height {
+                            let clicked_row_f = (position.y - state.header_height
+                                + state.scroll_offset.y)
+                                / state.body_cell_height;
+                            if clicked_row_f >= 0.0 {
+                                let clicked_row = clicked_row_f.floor() as usize;
+                                if clicked_row < self.rows.len() {
+                                    let click_x_rel =
+                                        position.x - GUTTER_WIDTH + state.scroll_offset.x;
+                                    let mut running_width_sum = 0.0;
+                                    for col_idx in 0..self.columns.len() {
+                                        let col_width = state.column_widths[col_idx];
+                                        let col_start = running_width_sum
+                                            + col_idx as f32 * 2.0 * self.padding_x;
+                                        let col_end = col_start + col_width + 2.0 * self.padding_x;
+                                        if click_x_rel >= col_start && click_x_rel < col_end {
+                                            let cells = self.rows[clicked_row].cells();
+                                            if col_idx < cells.len() {
+                                                shell.write_clipboard(
+                                                    iced::advanced::clipboard::Content::Text(
+                                                        cells[col_idx].clone(),
+                                                    ),
+                                                );
+                                            }
+                                            break;
+                                        }
+                                        running_width_sum += col_width;
+                                    }
+                                }
+                            }
+                        }
+                        shell.capture_event();
+                        return;
+                    }
+
                     let mut running_width_sum = 0.0;
                     for i in 0..self.columns.len() {
                         let col_width = state.column_widths[i];
