@@ -122,10 +122,16 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> S
 
     // Fallback: try text, then NULL
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v.unwrap_or_else(|| "NULL".to_string());
+        return match v {
+            Some(s) => s.replace('\r', "\\r").replace('\n', "\\n"),
+            None => "NULL".to_string(),
+        };
     }
     if let Ok(v) = row.try_get::<Option<&str>, _>(idx) {
-        return v.unwrap_or("NULL").to_string();
+        return match v {
+            Some(s) => s.replace('\r', "\\r").replace('\n', "\\n"),
+            None => "NULL".to_string(),
+        };
     }
 
     "NULL".to_string()
