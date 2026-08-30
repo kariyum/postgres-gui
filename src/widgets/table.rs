@@ -330,7 +330,7 @@ where
                 },
                 style.gutter_odd_row_bg,
             );
-            for i in (0..state.gutter_paragraphs.len())
+            for i in (0..self.rows.len())
                 .skip(state.start_row_index)
                 .take(state.viewport_max_rows_count)
                 .filter(|i| (i >> 0) & 1 == 1)
