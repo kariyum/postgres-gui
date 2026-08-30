@@ -162,8 +162,33 @@ where
         state.text_height = state.gutter_paragraphs[0].min_height();
         state.body_cell_height = state.text_height + 2.0 * self.padding_y;
 
+        let viewport = limits.max();
+        let total_padding = self.columns.len() as f32 * 2.0 * self.padding_x;
+        state.max_scroll_offset = Point {
+            x: (state.body_width + total_padding - (viewport.width - GUTTER_WIDTH)).max(0.0),
+            y: if state.body_cell_height > 0.0 {
+                (self.rows.len() as f32 * state.body_cell_height
+                    - (viewport.height - state.header_height))
+                    .max(0.0)
+            } else {
+                0.0
+            },
+        };
+
+        state.scroll_target = Point {
+            x: state.scroll_target.x.clamp(0.0, state.max_scroll_offset.x),
+            y: state.scroll_target.y.clamp(0.0, state.max_scroll_offset.y),
+        };
+        state.scroll_offset = Point {
+            x: state.scroll_offset.x.clamp(0.0, state.max_scroll_offset.x),
+            y: state.scroll_offset.y.clamp(0.0, state.max_scroll_offset.y),
+        };
+
+        state.start_row_index =
+            (state.scroll_offset.y / state.body_cell_height).floor() as usize;
+
         let viewport_max_rows_count =
-            (limits.max().height / state.body_cell_height).ceil() as usize;
+            (viewport.height / state.body_cell_height).ceil() as usize;
 
         state.viewport_max_rows_count = viewport_max_rows_count;
 
@@ -604,6 +629,7 @@ struct State<P: Paragraph> {
     body_width: f32,
     scroll_offset: Point<f32>,
     scroll_target: Point<f32>,
+    max_scroll_offset: Point<f32>,
     last_frame: Option<Instant>,
     start_row_index: usize,
     viewport_max_rows_count: usize,
@@ -632,6 +658,7 @@ impl<P: Paragraph> Default for State<P> {
             body_width: 0.0,
             scroll_offset: Point { x: 0.0, y: 0.0 },
             scroll_target: Point { x: 0.0, y: 0.0 },
+            max_scroll_offset: Point { x: 0.0, y: 0.0 },
             last_frame: None,
             start_row_index: 0,
             viewport_max_rows_count: 0,
@@ -728,8 +755,8 @@ where
                 };
 
                 state.scroll_target = Point {
-                    x: state.scroll_target.x + dx,
-                    y: state.scroll_target.y + dy,
+                    x: (state.scroll_target.x + dx).clamp(0.0, state.max_scroll_offset.x),
+                    y: (state.scroll_target.y + dy).clamp(0.0, state.max_scroll_offset.y),
                 };
 
                 state.start_row_index =
