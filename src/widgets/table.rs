@@ -245,7 +245,7 @@ where
                 renderer.fill_paragraph(
                     cell.raw(),
                     Point {
-                        x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
+                        x: gutter_bounds.x + self.padding_x,
                         y: gutter_bounds.y
                             + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
                             + self.padding_y
@@ -253,7 +253,7 @@ where
                     },
                     style.row_text,
                     iced::Rectangle {
-                        x: gutter_bounds.x + self.padding_x - state.scroll_offset.x,
+                        x: gutter_bounds.x + self.padding_x,
                         y: gutter_bounds.y
                             + i as f32 * (cell.min_height() + 2.0 * self.padding_y)
                             + self.padding_y
@@ -369,14 +369,16 @@ where
                     Point {
                         x: header_bounds.x
                             + (running_width_sum + i as f32 * 2.0 * self.padding_x)
-                            + self.padding_x,
+                            + self.padding_x
+                            - state.scroll_offset.x,
                         y: header_bounds.y + self.padding_y,
                     },
                     style.header_text,
                     iced::Rectangle {
                         x: header_bounds.x
                             + (running_width_sum + i as f32 * 2.0 * self.padding_x)
-                            + self.padding_x,
+                            + self.padding_x
+                            - state.scroll_offset.x,
                         y: header_bounds.y + self.padding_y,
                         width: col.min_width() + 2.0 * self.padding_x,
                         height: state.header_height,
@@ -567,7 +569,7 @@ where
                 renderer.fill_quad(
                     renderer::Quad {
                         bounds: iced::Rectangle {
-                            x: header_x,
+                            x: header_x - state.scroll_offset.x,
                             y: header_bounds.y,
                             width: 1.0,
                             height: header_bounds.height,
@@ -735,6 +737,9 @@ where
 
                 shell.request_redraw();
                 shell.capture_event();
+            }
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.keyboard_modifiers = *modifiers;
             }
             Event::Window(window::Event::RedrawRequested(instant)) => {
                 if state.scroll_offset != state.scroll_target {
