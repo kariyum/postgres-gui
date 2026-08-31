@@ -617,6 +617,73 @@ where
             });
         }
     }
+
+    fn handle_double_click<P: Paragraph>(
+        &mut self,
+        state: &mut State<P>,
+        position: Point,
+    ) -> Option<String> {
+        let now = Instant::now();
+        let is_double_click = if let Some((last_pos, last_time)) = state.last_click {
+            last_pos.distance(position) < 5.0 && (now - last_time).as_millis() <= 300
+        } else {
+            false
+        };
+        state.last_click = Some((position, now));
+        if is_double_click {
+            let clicked_row_f =
+                (position.y - state.header_height + state.scroll_offset.y) / state.body_cell_height;
+            let clicked_row = clicked_row_f.floor() as usize;
+            let click_x_rel = position.x - GUTTER_WIDTH + state.scroll_offset.x;
+            if position.x >= GUTTER_WIDTH
+                && position.y >= state.header_height
+                && clicked_row_f >= 0.0
+                && clicked_row < self.rows.len()
+            {
+                let mut running_width_sum = 0.0;
+                for col_idx in 0..self.columns.len() {
+                    let col_width = state.column_widths[col_idx];
+                    let col_start = running_width_sum + col_idx as f32 * 2.0 * self.padding_x;
+                    let col_end = col_start + col_width + 2.0 * self.padding_x;
+                    if click_x_rel >= col_start && click_x_rel < col_end {
+                        let cells = self.rows[clicked_row].cells();
+                        if col_idx < cells.len() {
+                            return Some(cells[col_idx].clone());
+                        }
+                        break;
+                    }
+                    running_width_sum += col_width;
+                }
+            }
+        }
+        None
+    }
+
+    fn handle_dragging<P: Paragraph>(
+        &mut self,
+        state: &mut State<P>,
+        bounds: iced::Rectangle,
+        position: Point,
+    ) -> Option<Drag> {
+        let mut running_width_sum = 0.0;
+        for i in 0..self.columns.len() {
+            let col_width = state.column_widths[i];
+            running_width_sum += col_width;
+            let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
+            let separator_x = bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
+
+            if (position.x - separator_x).abs() <= 5.0 {
+                return Some(Drag::ColumnResize(ColumnResize {
+                    left_col_index: i,
+                    start_x: position.x,
+                    left_start_width: col_width,
+                    right_start_width: state.column_widths
+                        [(i + 1).min(state.column_widths.len() - 1)],
+                }));
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -796,68 +863,14 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position_in(bounds) {
-                    let now = Instant::now();
-                    let is_double_click = if let Some((last_pos, last_time)) = state.last_click {
-                        last_pos.distance(position) < 5.0 && (now - last_time).as_millis() <= 300
-                    } else {
-                        false
-                    };
-                    state.last_click = Some((position, now));
-                    if is_double_click {
-                        if position.x >= GUTTER_WIDTH && position.y >= state.header_height {
-                            let clicked_row_f = (position.y - state.header_height
-                                + state.scroll_offset.y)
-                                / state.body_cell_height;
-                            if clicked_row_f >= 0.0 {
-                                let clicked_row = clicked_row_f.floor() as usize;
-                                if clicked_row < self.rows.len() {
-                                    let click_x_rel =
-                                        position.x - GUTTER_WIDTH + state.scroll_offset.x;
-                                    let mut running_width_sum = 0.0;
-                                    for col_idx in 0..self.columns.len() {
-                                        let col_width = state.column_widths[col_idx];
-                                        let col_start = running_width_sum
-                                            + col_idx as f32 * 2.0 * self.padding_x;
-                                        let col_end = col_start + col_width + 2.0 * self.padding_x;
-                                        if click_x_rel >= col_start && click_x_rel < col_end {
-                                            let cells = self.rows[clicked_row].cells();
-                                            if col_idx < cells.len() {
-                                                shell.write_clipboard(
-                                                    iced::advanced::clipboard::Content::Text(
-                                                        cells[col_idx].clone(),
-                                                    ),
-                                                );
-                                            }
-                                            break;
-                                        }
-                                        running_width_sum += col_width;
-                                    }
-                                }
-                            }
-                        }
+                    if let Some(text) = self.handle_double_click(state, position) {
+                        shell.write_clipboard(iced::advanced::clipboard::Content::Text(text));
                         shell.capture_event();
                         return;
                     }
 
-                    let mut running_width_sum = 0.0;
-                    for i in 0..self.columns.len() {
-                        let col_width = state.column_widths[i];
-                        running_width_sum += col_width;
-                        let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
-                        let separator_x =
-                            bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
-
-                        if (position.x - separator_x).abs() <= 5.0 {
-                            state.dragging = Some(Drag::ColumnResize(ColumnResize {
-                                left_col_index: i,
-                                start_x: position.x,
-                                left_start_width: col_width,
-                                right_start_width: state.column_widths[i + 1],
-                            }));
-                            shell.capture_event();
-                            return;
-                        }
-                    }
+                    state.dragging = self.handle_dragging(state, bounds, position);
+                    shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -981,7 +994,7 @@ fn updated_width<P: Paragraph>(
     let delta_x = position.x - start_x;
     if left_start_width + delta_x >= state.header_paragraphs[left_col_index].min_width() {
         state.column_widths[left_col_index] = left_start_width + delta_x;
-    } else {
+    } else if left_col_index + 1 < state.column_widths.len() {
         let delta = delta_x.abs() - (left_start_width - state.column_widths[left_col_index]);
         state.column_widths[left_col_index + 1] = right_start_width + delta;
     }
