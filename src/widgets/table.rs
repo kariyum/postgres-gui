@@ -620,12 +620,16 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
+struct ColumnResize {
+    left_col_index: usize,
+    start_x: f32,
+    left_start_width: f32,
+    right_start_width: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
 enum Drag {
-    ColumnResize {
-        col_index: usize,
-        start_x: f32,
-        start_width: f32,
-    },
+    ColumnResize(ColumnResize),
 }
 
 struct State<P: Paragraph> {
@@ -752,7 +756,7 @@ where
         let bounds = layout.bounds();
 
         if let Some(position) = cursor.position_in(bounds) {
-            if let Some(Drag::ColumnResize { .. }) = state.dragging {
+            if let Some(Drag::ColumnResize(ColumnResize { .. })) = state.dragging {
                 return mouse::Interaction::ResizingHorizontally;
             }
 
@@ -844,11 +848,12 @@ where
                             bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
 
                         if (position.x - separator_x).abs() <= 5.0 {
-                            state.dragging = Some(Drag::ColumnResize {
-                                col_index: i,
+                            state.dragging = Some(Drag::ColumnResize(ColumnResize {
+                                left_col_index: i,
                                 start_x: position.x,
-                                start_width: col_width,
-                            });
+                                left_start_width: col_width,
+                                right_start_width: state.column_widths[i + 1],
+                            }));
                             shell.capture_event();
                             return;
                         }
@@ -856,22 +861,14 @@ where
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if let Some(Drag::ColumnResize { .. }) = state.dragging {
+                if let Some(Drag::ColumnResize(ColumnResize { .. })) = state.dragging {
                     state.dragging = None;
                     shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                if let Some(Drag::ColumnResize {
-                    col_index,
-                    start_x,
-                    start_width,
-                }) = state.dragging
-                {
-                    let delta_x = position.x - start_x;
-                    let min_width = state.header_paragraphs[col_index].min_width();
-                    let new_width = (start_width + delta_x).max(min_width);
-                    state.column_widths[col_index] = new_width;
+                if let Some(Drag::ColumnResize(column_resize)) = state.dragging {
+                    updated_width(state, position, column_resize);
 
                     state.body_width = state.column_widths.iter().sum();
                     let total_padding = self.columns.len() as f32 * 2.0 * self.padding_x;
@@ -968,6 +965,25 @@ where
             }
             _ => (),
         }
+    }
+}
+
+fn updated_width<P: Paragraph>(
+    state: &mut State<P>,
+    position: &Point,
+    ColumnResize {
+        left_col_index,
+        start_x,
+        left_start_width,
+        right_start_width,
+    }: ColumnResize,
+) {
+    let delta_x = position.x - start_x;
+    if left_start_width + delta_x >= state.header_paragraphs[left_col_index].min_width() {
+        state.column_widths[left_col_index] = left_start_width + delta_x;
+    } else {
+        let delta = delta_x.abs() - (left_start_width - state.column_widths[left_col_index]);
+        state.column_widths[left_col_index + 1] = right_start_width + delta;
     }
 }
 
