@@ -881,7 +881,7 @@ where
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if let Some(Drag::ColumnResize(column_resize)) = state.dragging {
-                    updated_width(state, position, column_resize);
+                    update_width(state, position, column_resize);
 
                     state.body_width = state.column_widths.iter().sum();
                     let total_padding = self.columns.len() as f32 * 2.0 * self.padding_x;
@@ -981,7 +981,7 @@ where
     }
 }
 
-fn updated_width<P: Paragraph>(
+fn update_width<P: Paragraph>(
     state: &mut State<P>,
     position: &Point,
     ColumnResize {
@@ -997,6 +997,10 @@ fn updated_width<P: Paragraph>(
     } else if left_col_index + 1 < state.column_widths.len() {
         let delta = delta_x.abs() - (left_start_width - state.column_widths[left_col_index]);
         state.column_widths[left_col_index + 1] = right_start_width + delta;
+        if left_col_index == state.column_widths.len() - 2 {
+            state.scroll_offset.x += delta;
+            state.scroll_target.x += delta;
+        }
     }
 }
 
