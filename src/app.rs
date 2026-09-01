@@ -298,9 +298,14 @@ impl App {
             Message::ConnectionConfig(msg) => match msg {
                 connection_config::Message::Connect(cfg) => {
                     // maybe init a connection here for the default database? maybe add fetches databases to config for faster login and error out when database not found
-                    Task::done(Message::Editor(editor::Message::Add(EditorConfig::new(
-                        cfg,
-                    ))))
+                    if let Some(ref tx) = self.database_keeper_actor_tx {
+                        Task::done(Message::Editor(editor::Message::Add(EditorConfig::new(
+                            cfg,
+                            tx.clone(),
+                        ))))
+                    } else {
+                        Task::none()
+                    }
                 }
                 connection_config::Message::Edit(cfg) => {
                     Task::done(Message::DialogMessage(DialogMessage::OpenEdit(cfg)))

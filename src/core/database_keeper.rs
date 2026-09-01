@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, StreamExt};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres};
 use tokio::sync::oneshot;
 use tracing::{info, warn};
 
@@ -16,6 +16,9 @@ pub struct SavedConnection {
     pub name: String,
     pub database: String,
 }
+
+#[derive(Debug, Clone)]
+struct Error(pub String);
 
 impl From<&ConnectionConfig> for SavedConnection {
     fn from(cfg: &ConnectionConfig) -> Self {
@@ -78,19 +81,16 @@ impl DatabaseKeeper {
                     database_name,
                     respond,
                 } => {
-                    let result = self.pools.get(&database_name).cloned().ok_or_else(|| {
-                        warn!(
-                            "GetPool: '{}' not found, available: {:?}",
-                            database_name,
-                            self.pools.keys().collect::<Vec<_>>()
-                        );
-                        ToolError(format!(
-                            "Database '{}' not found of not connected yet. Please connect to the database you would with exposed tools. Connected databases: {:?}",
-                            database_name,
-                            self.pools.keys().collect::<Vec<_>>()
-                        ))
-                    });
-                    let _ = respond.send(result);
+                    let pool = match self.pools.get(&database_name).cloned() {
+                        Some(pool) => Ok(pool),
+                        None => self
+                            .connect(&database_name)
+                            .await
+                            .map_err(|err| ToolError(err.0)),
+                    };
+                    if let Err(_) = respond.send(pool) {
+                        tracing::error!("Oneshot channel was closed before sending a response.");
+                    }
                 }
                 DatabaseKeeperMessage::GetConnections { respond } => {
                     let saved: Vec<SavedConnection> =
@@ -122,31 +122,38 @@ impl DatabaseKeeper {
         }
     }
 
-    async fn handle_connect(&mut self, database_name: &str) -> Result<String, ToolError> {
+    async fn connect(&mut self, config_name: &str) -> Result<sqlx::Pool<Postgres>, Error> {
         let config = self
             .configs
             .iter()
-            .find(|c| c.name == database_name || c.id == database_name || c.database == database_name)
+            .find(|c| c.name == config_name)
             .ok_or_else(|| {
-                ToolError(format!(
+                Error(format!(
                     "No saved connection named '{}'. Use list_connections to see available connections.",
-                    database_name
+                    config_name
                 ))
             })?
             .clone();
 
-        let cs = config.connection_string();
-        let pool = db::connect(&cs)
+        let pool = db::connect(&config.connection_string())
             .await
-            .map_err(|e| ToolError(format!("Failed to connect: {e}")))?;
+            .map_err(|e| Error(format!("Failed to connect: {e}")))?;
 
-        self.pools.insert(config.name.clone(), pool);
+        self.pools.insert(config.name.clone(), pool.clone());
         info!("ConnectDatabase: connected to '{}'", config.name);
+        Ok(pool)
+    }
 
-        Ok(format!(
-            "Connected to '{}' (database: '{}'). The database is now available for queries.",
-            config.name, config.database
-        ))
+    async fn handle_connect(&mut self, database_name: &str) -> Result<String, ToolError> {
+        match self.connect(database_name).await {
+            Ok(_) => Ok(format!(
+                "Connected to '{}'. The database is now available for queries. Please use '{database_name}' for future queries.",
+                database_name
+            )),
+            Err(Error(err)) => Err(ToolError(format!(
+                "Failed to connect to '{database_name}'. Failure reason: {err}"
+            ))),
+        }
     }
 
     fn handle_connection_action(&mut self, connection_action: ConnectionAction) {

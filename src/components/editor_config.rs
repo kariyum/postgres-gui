@@ -1,14 +1,21 @@
 use std::{rc::Rc, sync::Arc};
 
+use crate::core::agent_tools::{DatabaseKeeperMessage, ToolError};
 use crate::db;
 use crate::types::QueryResult;
 use crate::{components::connection_config::ConnectionConfig, widgets};
+
+use anyhow::Context;
+use iced::futures::SinkExt;
+use iced::futures::channel::mpsc::Sender;
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
     theme,
     widget::{Column, button, column, container, pane_grid, row, rule, svg, text, text_editor},
 };
+use sqlx::database;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Clone)]
 pub struct EditorConfig {
@@ -22,8 +29,7 @@ pub struct EditorConfig {
     result: Option<Arc<QueryResult>>,
     error: Option<String>,
     running: bool,
-    // database_keeper:
-    // query filters
+    database_keeper: Sender<DatabaseKeeperMessage>,
     // query state (idle, running, finished ...)
 }
 
@@ -41,8 +47,11 @@ pub enum Message {
     ToolbarActions(ToolbarActions),
     Resized(pane_grid::ResizeEvent),
     QueryCompleted {
-        pool: Option<sqlx::PgPool>,
         result: Result<Arc<QueryResult>, String>,
+    },
+    PoolReady {
+        pool: Result<sqlx::Pool<sqlx::Postgres>, crate::core::agent_tools::ToolError>,
+        query: String,
     },
 }
 
@@ -52,7 +61,7 @@ pub enum ToolbarActions {
 }
 
 impl EditorConfig {
-    pub fn new(connection_config: ConnectionConfig) -> Self {
+    pub fn new(connection_config: ConnectionConfig, tx: Sender<DatabaseKeeperMessage>) -> Self {
         let (pane, editor_pane) = pane_grid::State::new(PaneKind::Editor);
         Self {
             database: connection_config.database.clone(),
@@ -60,6 +69,7 @@ impl EditorConfig {
             editor: text_editor::Content::new(),
             panes: pane,
             editor_pane,
+            database_keeper: tx,
             table_pane: None,
             pool: None,
             result: None,
@@ -84,8 +94,7 @@ impl EditorConfig {
                 self.panes.resize(resize_event.split, resize_event.ratio);
                 Task::none()
             }
-            Message::QueryCompleted { pool, result } => {
-                self.pool = pool;
+            Message::QueryCompleted { result } => {
                 self.running = false;
                 match result {
                     Ok(query_result) => self.result = Some(query_result),
@@ -93,6 +102,18 @@ impl EditorConfig {
                 }
                 Task::none()
             }
+            Message::PoolReady { pool, query } => match pool {
+                Ok(pool) => Task::perform(
+                    async move { db::execute_query(&pool, &query).await },
+                    |result| Message::QueryCompleted {
+                        result: result.map(|r| Arc::new(r)),
+                    },
+                ),
+                Err(err) => {
+                    self.error = Some(err.0);
+                    Task::none()
+                }
+            },
         }
     }
 
@@ -113,27 +134,29 @@ impl EditorConfig {
                 self.result = None;
                 self.error = None;
 
-                let connection_string = self.config.connection_string();
-                let sql = self.editor.text();
-                let pool = self.pool.clone();
-
+                let (tx, rx) = oneshot::channel();
+                let mut database_keeper_tx = self.database_keeper.clone();
+                let database = self.config.name.clone();
+                let query = self.editor.text();
                 Task::perform(
                     async move {
-                        let pool = match pool {
-                            Some(pool) => pool,
-                            None => match db::connect(&connection_string).await {
-                                Ok(pool) => pool,
-                                Err(err) => return (None, Err(err)),
-                            },
-                        };
-
-                        let result = db::execute_query(&pool, &sql).await;
-                        (Some(pool), result)
+                        if let Err(err) = database_keeper_tx
+                            .send(DatabaseKeeperMessage::GetPool {
+                                database_name: database,
+                                respond: tx,
+                            })
+                            .await
+                        {
+                            tracing::error!("Failed to GetPool {err}");
+                            Err(ToolError(String::from("Failed to GetPool {err}")))
+                        } else {
+                            rx.await
+                                .context("Oneshot channel was dropped")
+                                .map_err(|err| ToolError(err.to_string()))
+                                .flatten()
+                        }
                     },
-                    |(pool, result)| Message::QueryCompleted {
-                        pool,
-                        result: result.map(|r| Arc::new(r)),
-                    },
+                    |pool| Message::PoolReady { pool, query },
                 )
             }
         }
