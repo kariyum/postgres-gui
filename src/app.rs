@@ -263,9 +263,12 @@ impl App {
             Message::ToggleAgentMenu => {
                 if let Some(pane) = self.agent_chat_pane {
                     self.panes.close(pane);
+                    self.agent_chat_pane = None;
+                } else if self.agent_chat.is_some() {
+                    self.add_agent_chat_pane();
                 } else {
+                    self.agent_menu_open = !self.agent_menu_open;
                 }
-                self.agent_menu_open = !self.agent_menu_open;
                 Task::none()
             }
             Message::CloseAgentMenu => {
@@ -285,13 +288,7 @@ impl App {
 
                     self.agent_chat = Some(AgentChat::new(provider, tx.clone()));
                     self.agent_menu_open = false;
-                    if let Some((agent_pane, _split)) = self.panes.split(
-                        pane_grid::Axis::Vertical,
-                        self.main_pane,
-                        PaneKind::AgentChat,
-                    ) {
-                        self.agent_chat_pane = Some(agent_pane);
-                    }
+                    self.add_agent_chat_pane();
                 }
                 Task::none()
             }
@@ -435,6 +432,16 @@ impl App {
                 .dialog
                 .update(dialog_message)
                 .map(Message::DialogMessage),
+        }
+    }
+
+    fn add_agent_chat_pane(&mut self) {
+        if let Some((agent_pane, _split)) = self.panes.split(
+            pane_grid::Axis::Vertical,
+            self.main_pane,
+            PaneKind::AgentChat,
+        ) {
+            self.agent_chat_pane = Some(agent_pane);
         }
     }
 
