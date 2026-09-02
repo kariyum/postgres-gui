@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::Context;
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
+use iced::keyboard::key::Named;
 use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{
@@ -14,6 +15,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::components::agent_chat::{AgentChat, AgentChatMessage};
+use crate::components::command_palette::{self, CommandPalette};
 use crate::components::connection_config;
 use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage};
 use crate::components::editor::{self, Editor};
@@ -58,6 +60,7 @@ pub enum Message {
     Editor(editor::Message),
     DialogMessage(DialogMessage),
     DatabaseKeeperReady(Sender<DatabaseKeeperMessage>),
+    CommandPalette(command_palette::Message),
 }
 
 #[derive(Debug)]
@@ -84,6 +87,7 @@ pub struct App {
     editor: Editor,
     database_keeper_actor_tx: Option<Sender<DatabaseKeeperMessage>>,
     app_config: AppConfig,
+    command_palette: CommandPalette,
 }
 
 impl Default for App {
@@ -106,6 +110,7 @@ impl Default for App {
             editor: Editor::default(),
             database_keeper_actor_tx: None,
             app_config: AppConfig::default(),
+            command_palette: CommandPalette::default(),
         }
     }
 }
@@ -432,6 +437,10 @@ impl App {
                 .dialog
                 .update(dialog_message)
                 .map(Message::DialogMessage),
+            Message::CommandPalette(message) => self
+                .command_palette
+                .update(message)
+                .map(Message::CommandPalette),
         }
     }
 
@@ -539,9 +548,10 @@ impl App {
 
     pub fn view(&self) -> Element<'_, Message> {
         let content_area = self.content_area();
-        let connection_manager_dialog = self.view_connection_manager_dialog();
-        let settings_dialog = self.view_settings_dialog();
-        let dialog = connection_manager_dialog.or(settings_dialog);
+        let dialog = self
+            .view_command_palette()
+            .or(self.view_connection_manager_dialog())
+            .or(self.view_settings_dialog());
 
         let layout = container(column![
             self.view_title_bar(),
@@ -600,6 +610,17 @@ impl App {
                     background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
                     ..Default::default()
                 })
+        })
+    }
+
+    fn view_command_palette(&self) -> Option<container::Container<'_, Message>> {
+        self.command_palette.view().map(|cmd| {
+            container(cmd.map(Message::CommandPalette))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Start)
+                .padding([150, 0])
         })
     }
 
@@ -745,6 +766,14 @@ impl App {
                     }
                     (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("-")) => {
                         Some(Message::ZoomOut)
+                    }
+                    (modifiers, iced::keyboard::Key::Character("p" | "P"))
+                        if modifiers.control() && modifiers.shift() =>
+                    {
+                        Some(Message::CommandPalette(command_palette::Message::Toggle))
+                    }
+                    (_, iced::keyboard::Key::Named(Named::Escape)) => {
+                        Some(Message::CommandPalette(command_palette::Message::Hide))
                     }
                     _ => None,
                 }

@@ -1,5 +1,6 @@
 pub mod agent_chat;
 pub mod chat_msg;
+pub mod command_palette;
 pub mod connection_config;
 pub mod connection_dialog;
 pub mod editor;
