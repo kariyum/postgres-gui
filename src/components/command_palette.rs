@@ -1,11 +1,15 @@
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::renderer::Renderer as _;
+use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Shell, mouse, overlay, renderer};
+use iced::widget::button;
 use iced::{
     Alignment, Background, Element, Event, Length, Padding, Rectangle, Size, Task, Theme, Vector,
+    keyboard,
     widget::{operation, text, text_input},
 };
+
+use crate::widgets::raw_text_input::RawTextInput;
 
 const SEARCH_BOX_ID: &str = "search_box";
 const PALETTE_WIDTH: f32 = 500.0;
@@ -22,6 +26,7 @@ pub enum Message {
     Toggle,
     Hide,
     InputChanged(String),
+    ExploreSchema,
 }
 
 impl CommandPalette {
@@ -49,6 +54,7 @@ impl CommandPalette {
                 self.search_query = str;
                 Task::none()
             }
+            Message::ExploreSchema => Task::none(),
         }
     }
 }
@@ -57,6 +63,7 @@ impl CommandPalette {
 /// palette contents, drawn over its own background.
 struct Palette<'a> {
     children: Vec<Element<'a, Message>>,
+    input_value: String,
     width: Length,
     height: Length,
     padding: Padding,
@@ -67,12 +74,17 @@ impl<'a> Palette<'a> {
     fn new(search_query: &'a str) -> Self {
         Self {
             children: vec![
-                text_input("Search", search_query)
-                    .on_input(Message::InputChanged)
-                    .id(SEARCH_BOX_ID)
+                RawTextInput::new("Search").value(search_query).into(),
+                // text_input("Search", search_query)
+                //     .on_input(Message::InputChanged)
+                //     .id(SEARCH_BOX_ID)
+                //     .into(),
+                button("Hi, I'm a command.")
+                    .on_press(Message::ExploreSchema)
+                    .width(Length::Fill)
                     .into(),
-                text("Hi, I'm a command palette.").into(),
             ],
+            input_value: search_query.to_string(),
             width: Length::Fixed(PALETTE_WIDTH),
             height: Length::Fixed(PALETTE_HEIGHT),
             padding: Padding::ZERO,
@@ -145,6 +157,20 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, text, .. }) = event {
+            match key.as_ref() {
+                keyboard::Key::Named(keyboard::key::Named::Backspace) => {
+                    self.input_value.pop();
+                    shell.publish(Message::InputChanged(self.input_value.clone()));
+                }
+                _ => {}
+            }
+            if let Some(text) = text {
+                self.input_value.push_str(text);
+                shell.publish(Message::InputChanged(self.input_value.clone()));
+            }
+        }
+
         for ((child, state), layout) in self
             .children
             .iter_mut()
