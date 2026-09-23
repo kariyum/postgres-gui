@@ -59,8 +59,16 @@ impl CommandPalette {
     }
 }
 
-/// The panel of a [`CommandPalette`]: a search box stacked on top of the
-/// palette contents, drawn over its own background.
+fn delete_last_word(value: &mut String) {
+    let trimmed = value.trim_end().len();
+    value.truncate(trimmed);
+
+    match value.rfind(|c: char| c.is_whitespace()) {
+        Some(index) => value.truncate(index + 1),
+        None => value.clear(),
+    }
+}
+
 struct Palette<'a> {
     children: Vec<Element<'a, Message>>,
     input_value: String,
@@ -157,17 +165,36 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if let Event::Keyboard(keyboard::Event::KeyPressed { key, text, .. }) = event {
+        if let Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            text,
+            modifiers,
+            ..
+        }) = event
+        {
             match key.as_ref() {
                 keyboard::Key::Named(keyboard::key::Named::Backspace) => {
-                    self.input_value.pop();
+                    if modifiers.control() {
+                        delete_last_word(&mut self.input_value);
+                    } else {
+                        self.input_value.pop();
+                    }
                     shell.publish(Message::InputChanged(self.input_value.clone()));
                 }
-                _ => {}
-            }
-            if let Some(text) = text {
-                self.input_value.push_str(text);
-                shell.publish(Message::InputChanged(self.input_value.clone()));
+                keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                    // Ignore Enter for now; it will be wired up later.
+                }
+                keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                    self.input_value.clear();
+                    shell.publish(Message::InputChanged(self.input_value.clone()));
+                }
+                _ if modifiers.control() => {}
+                _ => {
+                    if let Some(text) = text {
+                        self.input_value.push_str(text);
+                        shell.publish(Message::InputChanged(self.input_value.clone()));
+                    }
+                }
             }
         }
 
