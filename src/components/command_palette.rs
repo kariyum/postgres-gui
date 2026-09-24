@@ -11,7 +11,6 @@ use iced::{
 
 use crate::widgets::raw_text_input::RawTextInput;
 
-const SEARCH_BOX_ID: &str = "search_box";
 const PALETTE_WIDTH: f32 = 500.0;
 const PALETTE_HEIGHT: f32 = 300.0;
 
@@ -60,14 +59,11 @@ impl CommandPalette {
         match message {
             Message::Toggle => {
                 self.is_visible = !self.is_visible;
-                if self.is_visible {
-                    operation::focus(SEARCH_BOX_ID)
-                } else {
-                    Task::none()
-                }
+                Task::none()
             }
             Message::Hide => {
                 self.is_visible = false;
+                self.search_query.clear();
                 Task::none()
             }
             Message::InputChanged(str) => {
@@ -225,7 +221,6 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
                     // Ignore Enter for now; it will be wired up later.
                 }
                 keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                    self.input_value.clear();
                     shell.publish(Message::InputChanged(self.input_value.clone()));
                 }
                 _ if modifiers.control() => {}
