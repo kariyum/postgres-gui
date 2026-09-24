@@ -45,6 +45,7 @@ pub enum Message {
     InputChanged(String),
     SelectNext,
     SelectPrevious,
+    Hovered(usize),
     ExploreSchema,
     ConnectTo,
     Settings,
@@ -104,6 +105,12 @@ impl CommandPalette {
                 let count = self.filtered_commands.len();
                 if count > 0 {
                     self.selected_command_index = (self.selected_command_index + count - 1) % count;
+                }
+                Task::none()
+            }
+            Message::Hovered(index) => {
+                if index != self.selected_command_index {
+                    self.selected_command_index = index;
                 }
                 Task::none()
             }

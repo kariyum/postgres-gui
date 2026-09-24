@@ -183,6 +183,19 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
             }
         }
 
+        if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event {
+            let index = layout
+                .child(2)
+                .children()
+                .enumerate()
+                .find(|(_, row)| cursor.is_over(row.bounds()))
+                .map(|(index, _)| index);
+
+            if let Some(index) = index {
+                shell.publish(Message::Hovered(index));
+            }
+        }
+
         for ((child, state), layout) in self
             .children
             .iter_mut()
