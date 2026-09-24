@@ -79,7 +79,7 @@ fn text_config(content: &str) -> text::Text<&str, iced::Font> {
 }
 
 impl RawTextInput {
-    fn draw_text<R>(&self, renderer: &mut R, bounds: Rectangle)
+    fn draw_text<R>(&self, renderer: &mut R, theme: &Theme, bounds: Rectangle)
     where
         R: text::Renderer<Font = iced::Font>,
     {
@@ -89,10 +89,16 @@ impl RawTextInput {
             y: bounds.center_y(),
         };
 
+        let color = if self.value.is_empty() {
+            theme.palette().secondary.base.color
+        } else {
+            iced::Color::WHITE
+        };
+
         renderer.fill_text(
             text_config(content).with_content(content.to_owned()),
             position,
-            iced::Color::WHITE,
+            color,
             bounds,
         );
     }
@@ -205,7 +211,7 @@ where
         &self,
         tree: &Tree,
         renderer: &mut R,
-        _theme: &Theme,
+        theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
@@ -214,7 +220,7 @@ where
         let bounds = layout.bounds();
         let state = tree.state.downcast_ref::<State>();
 
-        self.draw_text(renderer, bounds);
+        self.draw_text(renderer, theme, bounds);
         self.draw_caret(state, renderer, bounds);
     }
 }

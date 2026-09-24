@@ -29,8 +29,6 @@ use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::database_keeper::{self, DatabaseKeeper};
 use iced_aw::drop_down;
 
-use crate::theme;
-
 #[derive(Debug, Clone)]
 pub enum Message {
     Close,
@@ -671,7 +669,7 @@ impl App {
                         weight: iced::font::Weight::Bold,
                         ..iced::Font::DEFAULT
                     }),
-                    text("PostgreSQL client").size(18).color(theme::TEXT_MUTED),
+                    text("PostgreSQL client").size(18).style(text::secondary),
                 ],
                 container(rule::horizontal(1)).width(400),
                 container(self.view_configs())

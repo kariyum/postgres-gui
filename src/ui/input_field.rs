@@ -1,6 +1,5 @@
 use iced::{Element, Length, Task};
 
-use crate::theme;
 use iced::widget::{column, text, text_input};
 
 #[derive(Debug, Clone)]
@@ -64,7 +63,7 @@ impl InputField {
 
     pub fn view(&self) -> Element<'_, InputFieldMessage> {
         column![
-            text(self.label.as_str()).size(12).color(theme::TEXT_MUTED),
+            text(self.label.as_str()).size(12).style(text::secondary),
             text_input(self.placeholder.as_str(), self.value.as_str())
                 .on_input(self.oninput)
                 .secure(self.is_secure)

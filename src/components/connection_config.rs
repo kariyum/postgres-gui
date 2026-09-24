@@ -4,8 +4,6 @@ use iced::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::theme;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     pub id: String,
@@ -73,7 +71,7 @@ impl ConnectionConfig {
                     }),
                     text(format!("{}/{}", self.user, self.database))
                         .size(11)
-                        .color(theme::TEXT_MUTED)
+                        .style(text::secondary)
                 ]
                 .spacing(2),
             )

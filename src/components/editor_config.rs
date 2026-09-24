@@ -243,7 +243,7 @@ impl EditorConfig {
                 iced::widget::Space::new().width(Length::Fill),
                 text(self.connection_string())
                     .size(11)
-                    .color(crate::theme::TEXT_MUTED),
+                    .style(text::secondary),
             ]
             .align_y(iced::Alignment::Center),
         )
@@ -301,13 +301,13 @@ impl EditorConfig {
         } else if self.running {
             text("Running query...")
                 .size(13)
-                .color(crate::theme::TEXT_MUTED)
+                .style(text::secondary)
                 .into()
         } else {
             container(
                 text("Run a query to see results here.")
                     .size(13)
-                    .color(crate::theme::TEXT_MUTED),
+                    .style(text::secondary),
             )
             .padding(16)
             .into()
