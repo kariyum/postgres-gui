@@ -4,11 +4,11 @@ use iced::advanced::layout::Node;
 use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph as _};
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{mouse, Layout, Shell, Widget};
-use iced::{keyboard, window, Element, Event, Length, Rectangle, Size, Theme};
+use iced::advanced::{Layout, Shell, Widget, mouse};
+use iced::{Element, Event, Length, Rectangle, Size, Theme, keyboard, window};
 
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
-const TEXT_SIZE: f32 = 14.0;
+const TEXT_SIZE: f32 = 12.0;
 const HORIZONTAL_PADDING: f32 = 4.0;
 
 #[derive(Debug, Clone, Default)]
@@ -108,16 +108,18 @@ impl RawTextInput {
         let caret_x = if self.value.is_empty() {
             bounds.x + HORIZONTAL_PADDING
         } else {
-            bounds.x + HORIZONTAL_PADDING + R::Paragraph::with_text(text_config(self.content())).min_width()
+            bounds.x
+                + HORIZONTAL_PADDING
+                + R::Paragraph::with_text(text_config(self.content())).min_width() + 1.0
         };
 
         renderer.fill_quad(
             renderer::Quad {
                 bounds: Rectangle {
                     x: caret_x,
-                    y: bounds.y + 4.0,
+                    y: bounds.y + 8.0,
                     width: 1.0,
-                    height: bounds.height - 8.0,
+                    height: bounds.height - 16.0,
                 },
                 ..renderer::Quad::default()
             },

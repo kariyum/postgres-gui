@@ -2,7 +2,7 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::Renderer as _;
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Shell, mouse, overlay, renderer};
-use iced::widget::{button, container};
+use iced::widget::{Column, button, container, rule};
 use iced::{
     Alignment, Background, Element, Event, Length, Padding, Rectangle, Size, Task, Theme, Vector,
     keyboard,
@@ -15,10 +15,30 @@ const SEARCH_BOX_ID: &str = "search_box";
 const PALETTE_WIDTH: f32 = 500.0;
 const PALETTE_HEIGHT: f32 = 300.0;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CommandPalette {
     is_visible: bool,
     search_query: String,
+    commands: Vec<Command>,
+}
+
+impl Default for CommandPalette {
+    fn default() -> Self {
+        Self {
+            is_visible: false,
+            search_query: String::new(),
+            commands: vec![
+                Command {
+                    label: String::from("Explore Schema"),
+                    message: Message::ExploreSchema,
+                },
+                Command {
+                    label: String::from("Connect to"),
+                    message: Message::ConnectTo,
+                },
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -27,12 +47,13 @@ pub enum Message {
     Hide,
     InputChanged(String),
     ExploreSchema,
+    ConnectTo,
 }
 
 impl CommandPalette {
     pub fn view(&self) -> Option<Element<'_, Message>> {
         self.is_visible
-            .then(|| Palette::new(&self.search_query).into())
+            .then(|| Palette::new(&self.search_query, &self.commands).into())
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -54,6 +75,7 @@ impl CommandPalette {
                 Task::none()
             }
             Message::ExploreSchema => Task::none(),
+            Message::ConnectTo => Task::none(),
         }
     }
 }
@@ -77,15 +99,38 @@ struct Palette<'a> {
     spacing: f32,
 }
 
+#[derive(Debug, Clone)]
+struct Command {
+    label: String,
+    message: Message,
+}
+
 impl<'a> Palette<'a> {
-    fn new(search_query: &'a str) -> Self {
+    fn new(search_query: &'a str, commands: &'a Vec<Command>) -> Self {
         Self {
             children: vec![
-                RawTextInput::new("Search").value(search_query).into(),
-                button("Hi, I'm a command.")
-                    .on_press(Message::ExploreSchema)
-                    .width(Length::Fill)
+                container(RawTextInput::new("Search").value(search_query))
+                    .padding([0, 4])
                     .into(),
+                rule::horizontal(1.0).into(),
+                Column::from_vec(
+                    commands
+                        .iter()
+                        .map(|command| {
+                            button(text(command.label.clone()).size(12))
+                                .on_press(command.message.clone())
+                                .width(Length::Fill)
+                                .style(|theme, status| button::Style {
+                                    ..button::primary(theme, status)
+                                })
+                                .padding([4, 4])
+                                .into()
+                        })
+                        .collect(),
+                )
+                .spacing(2)
+                .padding(4)
+                .into(),
             ],
             input_value: search_query.to_string(),
             width: Length::Fixed(PALETTE_WIDTH),
