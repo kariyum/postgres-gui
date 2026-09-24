@@ -2,7 +2,7 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::Renderer as _;
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Shell, mouse, overlay, renderer};
-use iced::widget::button;
+use iced::widget::{button, container};
 use iced::{
     Alignment, Background, Element, Event, Length, Padding, Rectangle, Size, Task, Theme, Vector,
     keyboard,
@@ -36,7 +36,6 @@ impl CommandPalette {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        tracing::info!("Got message {:?}", message);
         match message {
             Message::Toggle => {
                 self.is_visible = !self.is_visible;
@@ -83,10 +82,6 @@ impl<'a> Palette<'a> {
         Self {
             children: vec![
                 RawTextInput::new("Search").value(search_query).into(),
-                // text_input("Search", search_query)
-                //     .on_input(Message::InputChanged)
-                //     .id(SEARCH_BOX_ID)
-                //     .into(),
                 button("Hi, I'm a command.")
                     .on_press(Message::ExploreSchema)
                     .width(Length::Fill)
@@ -249,22 +244,29 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
+                border: iced::Border {
+                    color: theme.palette().background.strongest.color,
+                    width: 1.0,
+                    radius: iced::border::radius(5.0),
+                },
                 ..Default::default()
             },
             Background::Color(theme.palette().background.weakest.color),
         );
 
-        for ((child, state), layout) in self
-            .children
-            .iter()
-            .zip(&tree.children)
-            .zip(layout.children())
-            .filter(|(_, layout)| layout.bounds().intersects(&clipped_viewport))
-        {
-            child
-                .as_widget()
-                .draw(state, renderer, theme, style, layout, cursor, viewport);
-        }
+        renderer.with_layer(bounds, |renderer| {
+            for ((child, state), layout) in self
+                .children
+                .iter()
+                .zip(&tree.children)
+                .zip(layout.children())
+                .filter(|(_, layout)| layout.bounds().intersects(&clipped_viewport))
+            {
+                child
+                    .as_widget()
+                    .draw(state, renderer, theme, style, layout, cursor, viewport);
+            }
+        });
     }
 
     fn overlay<'a>(

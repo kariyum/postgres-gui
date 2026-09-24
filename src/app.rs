@@ -620,7 +620,7 @@ impl App {
                 .height(Length::Fill)
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Start)
-                .padding([150, 0])
+                .padding([100, 0])
         })
     }
 

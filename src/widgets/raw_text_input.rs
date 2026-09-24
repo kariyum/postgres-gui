@@ -79,19 +79,6 @@ fn text_config(content: &str) -> text::Text<&str, iced::Font> {
 }
 
 impl RawTextInput {
-    fn draw_background<R>(&self, renderer: &mut R, theme: &Theme, bounds: Rectangle)
-    where
-        R: text::Renderer<Font = iced::Font>,
-    {
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds,
-                ..renderer::Quad::default()
-            },
-            theme.palette().background.stronger.color,
-        );
-    }
-
     fn draw_text<R>(&self, renderer: &mut R, bounds: Rectangle)
     where
         R: text::Renderer<Font = iced::Font>,
@@ -216,7 +203,7 @@ where
         &self,
         tree: &Tree,
         renderer: &mut R,
-        theme: &Theme,
+        _theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
@@ -225,7 +212,6 @@ where
         let bounds = layout.bounds();
         let state = tree.state.downcast_ref::<State>();
 
-        self.draw_background(renderer, theme, bounds);
         self.draw_text(renderer, bounds);
         self.draw_caret(state, renderer, bounds);
     }
