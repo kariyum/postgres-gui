@@ -51,8 +51,13 @@ pub enum Message {
 
 impl CommandPalette {
     pub fn view(&self) -> Option<Element<'_, Message>> {
-        self.is_visible
-            .then(|| Palette::new(&self.search_query, &self.commands).into())
+        self.is_visible.then(|| {
+            Palette::new(
+                &self.search_query,
+                filter_commands(&self.commands, &self.search_query),
+            )
+            .into()
+        })
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -66,14 +71,27 @@ impl CommandPalette {
                 self.search_query.clear();
                 Task::none()
             }
-            Message::InputChanged(str) => {
-                self.search_query = str;
+            Message::InputChanged(query) => {
+                self.search_query = query;
                 Task::none()
             }
             Message::ExploreSchema => Task::none(),
             Message::ConnectTo => Task::none(),
         }
     }
+}
+
+fn filter_commands(commands: &Vec<Command>, search_query: &String) -> Vec<Command> {
+    commands
+        .iter()
+        .filter(|command| {
+            command
+                .label
+                .to_lowercase()
+                .contains(search_query.to_lowercase().as_str())
+        })
+        .map(|command| command.clone())
+        .collect()
 }
 
 fn delete_last_word(value: &mut String) {
@@ -102,7 +120,7 @@ struct Command {
 }
 
 impl<'a> Palette<'a> {
-    fn new(search_query: &'a str, commands: &'a Vec<Command>) -> Self {
+    fn new(search_query: &'a str, commands: Vec<Command>) -> Self {
         Self {
             children: vec![
                 container(RawTextInput::new("Search").value(search_query))
