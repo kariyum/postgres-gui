@@ -19,23 +19,33 @@ pub struct CommandPalette {
     is_visible: bool,
     search_query: String,
     commands: Vec<Command>,
+    filtered_commands: Vec<Command>,
+    selected_command_index: usize,
 }
 
 impl Default for CommandPalette {
     fn default() -> Self {
+        let commands = vec![
+            Command {
+                label: String::from("Explore schema"),
+                message: Message::ExploreSchema,
+            },
+            Command {
+                label: String::from("Connect to"),
+                message: Message::ConnectTo,
+            },
+            Command {
+                label: String::from("Settings"),
+                message: Message::Settings,
+            },
+        ];
+
         Self {
             is_visible: false,
             search_query: String::new(),
-            commands: vec![
-                Command {
-                    label: String::from("Explore Schema"),
-                    message: Message::ExploreSchema,
-                },
-                Command {
-                    label: String::from("Connect to"),
-                    message: Message::ConnectTo,
-                },
-            ],
+            filtered_commands: Vec::new(),
+            commands,
+            selected_command_index: 0,
         }
     }
 }
@@ -45,16 +55,27 @@ pub enum Message {
     Toggle,
     Hide,
     InputChanged(String),
+    SelectNext,
+    SelectPrevious,
     ExploreSchema,
     ConnectTo,
+    Settings,
 }
 
 impl CommandPalette {
     pub fn view(&self) -> Option<Element<'_, Message>> {
         self.is_visible.then(|| {
+            let selected_index = if self.filtered_commands.is_empty() {
+                0
+            } else {
+                self.selected_command_index
+                    .min(self.filtered_commands.len() - 1)
+            };
+
             Palette::new(
                 &self.search_query,
-                filter_commands(&self.commands, &self.search_query),
+                self.filtered_commands.clone(),
+                selected_index,
             )
             .into()
         })
@@ -69,19 +90,41 @@ impl CommandPalette {
             Message::Hide => {
                 self.is_visible = false;
                 self.search_query.clear();
+                self.refresh_filtered_commands();
                 Task::none()
             }
             Message::InputChanged(query) => {
                 self.search_query = query;
+                self.selected_command_index = 0;
+                self.refresh_filtered_commands();
+                Task::none()
+            }
+            Message::SelectNext => {
+                let count = self.filtered_commands.len();
+                if count > 0 {
+                    self.selected_command_index = (self.selected_command_index + 1) % count;
+                }
+                Task::none()
+            }
+            Message::SelectPrevious => {
+                let count = self.filtered_commands.len();
+                if count > 0 {
+                    self.selected_command_index = (self.selected_command_index + count - 1) % count;
+                }
                 Task::none()
             }
             Message::ExploreSchema => Task::none(),
             Message::ConnectTo => Task::none(),
+            Message::Settings => Task::none(),
         }
+    }
+
+    fn refresh_filtered_commands(&mut self) {
+        self.filtered_commands = filter_commands(&self.commands, &self.search_query);
     }
 }
 
-fn filter_commands(commands: &Vec<Command>, search_query: &String) -> Vec<Command> {
+fn filter_commands(commands: &[Command], search_query: &str) -> Vec<Command> {
     commands
         .iter()
         .filter(|command| {
@@ -120,7 +163,7 @@ struct Command {
 }
 
 impl<'a> Palette<'a> {
-    fn new(search_query: &'a str, commands: Vec<Command>) -> Self {
+    fn new(search_query: &'a str, commands: Vec<Command>, selected_command_index: usize) -> Self {
         Self {
             children: vec![
                 container(RawTextInput::new("Search").value(search_query))
@@ -130,11 +173,22 @@ impl<'a> Palette<'a> {
                 Column::from_vec(
                     commands
                         .iter()
-                        .map(|command| {
-                            button(text(command.label.clone()).size(12))
-                                .on_press(command.message.clone())
+                        .enumerate()
+                        .map(|(index, command)| {
+                            let label = command.label.clone();
+                            let message = command.message.clone();
+                            let is_selected = index == selected_command_index;
+
+                            button(text(label).size(12))
+                                .on_press(message)
                                 .width(Length::Fill)
-                                .style(|theme, status| button::Style {
+                                .style(move |theme: &Theme, status| button::Style {
+                                    background: Some(Background::Color(if is_selected {
+                                        theme.palette().background.stronger.color
+                                    } else {
+                                        theme.palette().background.weak.color
+                                    })),
+                                    text_color: theme.palette().background.weak.text,
                                     ..button::primary(theme, status)
                                 })
                                 .padding([4, 4])
@@ -237,6 +291,12 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
                 }
                 keyboard::Key::Named(keyboard::key::Named::Enter) => {
                     // Ignore Enter for now; it will be wired up later.
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                    shell.publish(Message::SelectNext);
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                    shell.publish(Message::SelectPrevious);
                 }
                 keyboard::Key::Named(keyboard::key::Named::Escape) => {
                     shell.publish(Message::InputChanged(self.input_value.clone()));
