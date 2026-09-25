@@ -2,22 +2,27 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::Renderer as _;
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Shell, mouse, overlay, renderer};
-use iced::widget::{Column, button, container, rule};
+use iced::widget::{Column, container, rule};
 use iced::{
     Alignment, Background, Element, Event, Length, Padding, Rectangle, Size, Theme, Vector,
     keyboard,
-    widget::text,
 };
 
-use crate::components::command_palette::{Command, Message};
 use crate::widgets::raw_text_input::RawTextInput;
 
 const PALETTE_WIDTH: f32 = 500.0;
 const PALETTE_HEIGHT: f32 = 300.0;
 
-pub struct Palette<'a> {
+pub struct Palette<'a, Message>
+where
+    Message: 'a,
+{
     children: Vec<Element<'a, Message>>,
     input_value: String,
+    on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
+    on_select_next: Option<Message>,
+    on_select_previous: Option<Message>,
+    on_hover: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     width: Length,
     height: Length,
     padding: Padding,
@@ -34,54 +39,56 @@ fn delete_last_word(value: &mut String) {
     }
 }
 
-impl<'a> Palette<'a> {
-    pub fn new(search_query: &'a str, commands: Vec<Command>, selected_command_index: usize) -> Self {
+impl<'a, Message> Palette<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    pub fn new(search_query: &'a str, rows: Vec<Element<'a, Message>>) -> Self {
         Self {
             children: vec![
                 container(RawTextInput::new("Search").value(search_query))
                     .padding([0, 4])
                     .into(),
                 rule::horizontal(1.0).into(),
-                Column::from_vec(
-                    commands
-                        .iter()
-                        .enumerate()
-                        .map(|(index, command)| {
-                            let label = command.label.clone();
-                            let message = command.message.clone();
-                            let is_selected = index == selected_command_index;
-
-                            button(text(label).size(12))
-                                .on_press(message)
-                                .width(Length::Fill)
-                                .style(move |theme: &Theme, status| button::Style {
-                                    background: Some(Background::Color(if is_selected {
-                                        theme.palette().background.stronger.color
-                                    } else {
-                                        theme.palette().background.weak.color
-                                    })),
-                                    text_color: theme.palette().background.weak.text,
-                                    ..button::primary(theme, status)
-                                })
-                                .padding([4, 4])
-                                .into()
-                        })
-                        .collect(),
-                )
-                .spacing(2)
-                .padding(4)
-                .into(),
+                Column::from_vec(rows).spacing(2).padding(4).into(),
             ],
             input_value: search_query.to_string(),
+            on_input: None,
+            on_select_next: None,
+            on_select_previous: None,
+            on_hover: None,
             width: Length::Fixed(PALETTE_WIDTH),
             height: Length::Fixed(PALETTE_HEIGHT),
             padding: Padding::ZERO,
             spacing: 0.0,
         }
     }
+
+    pub fn on_input(mut self, on_input: impl Fn(String) -> Message + 'a) -> Self {
+        self.on_input = Some(Box::new(on_input));
+        self
+    }
+
+    pub fn on_select_next(mut self, message: Message) -> Self {
+        self.on_select_next = Some(message);
+        self
+    }
+
+    pub fn on_select_previous(mut self, message: Message) -> Self {
+        self.on_select_previous = Some(message);
+        self
+    }
+
+    pub fn on_hover(mut self, on_hover: impl Fn(usize) -> Message + 'a) -> Self {
+        self.on_hover = Some(Box::new(on_hover));
+        self
+    }
 }
 
-impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
+impl<Message> Widget<Message, Theme, iced::Renderer> for Palette<'_, Message>
+where
+    Message: Clone,
+{
     fn size(&self) -> Size<Length> {
         Size {
             width: self.width,
@@ -159,25 +166,37 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
                     } else {
                         self.input_value.pop();
                     }
-                    shell.publish(Message::InputChanged(self.input_value.clone()));
+
+                    if let Some(on_input) = &self.on_input {
+                        shell.publish(on_input(self.input_value.clone()));
+                    }
                 }
                 keyboard::Key::Named(keyboard::key::Named::Enter) => {
                     // Ignore Enter for now; it will be wired up later.
                 }
                 keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
-                    shell.publish(Message::SelectNext);
+                    if let Some(message) = &self.on_select_next {
+                        shell.publish(message.clone());
+                    }
                 }
                 keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
-                    shell.publish(Message::SelectPrevious);
+                    if let Some(message) = &self.on_select_previous {
+                        shell.publish(message.clone());
+                    }
                 }
                 keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                    shell.publish(Message::InputChanged(self.input_value.clone()));
+                    if let Some(on_input) = &self.on_input {
+                        shell.publish(on_input(self.input_value.clone()));
+                    }
                 }
                 _ if modifiers.control() => {}
                 _ => {
                     if let Some(text) = text {
                         self.input_value.push_str(text);
-                        shell.publish(Message::InputChanged(self.input_value.clone()));
+
+                        if let Some(on_input) = &self.on_input {
+                            shell.publish(on_input(self.input_value.clone()));
+                        }
                     }
                 }
             }
@@ -192,7 +211,9 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
                 .map(|(index, _)| index);
 
             if let Some(index) = index {
-                shell.publish(Message::Hovered(index));
+                if let Some(on_hover) = &self.on_hover {
+                    shell.publish(on_hover(index));
+                }
             }
         }
 
@@ -291,8 +312,11 @@ impl Widget<Message, Theme, iced::Renderer> for Palette<'_> {
     }
 }
 
-impl<'a> From<Palette<'a>> for Element<'a, Message> {
-    fn from(palette: Palette<'a>) -> Self {
+impl<'a, Message> From<Palette<'a, Message>> for Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    fn from(palette: Palette<'a, Message>) -> Self {
         Self::new(palette)
     }
 }

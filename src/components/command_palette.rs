@@ -1,6 +1,7 @@
-use iced::{Element, Task};
+use iced::widget::{button, text};
+use iced::{Background, Element, Length, Task, Theme};
 
-use crate::components::palette::Palette;
+use crate::widgets::palette::Palette;
 
 #[derive(Debug, Clone)]
 pub struct CommandPalette {
@@ -60,19 +61,42 @@ pub struct Command {
 impl CommandPalette {
     pub fn view(&self) -> Option<Element<'_, Message>> {
         self.is_visible.then(|| {
-            let selected_index = if self.filtered_commands.is_empty() {
-                0
-            } else {
-                self.selected_command_index
-                    .min(self.filtered_commands.len() - 1)
-            };
+            let selected_index = self
+                .selected_command_index
+                .min(self.filtered_commands.len().saturating_sub(1));
 
-            Palette::new(
-                &self.search_query,
-                self.filtered_commands.clone(),
-                selected_index,
-            )
-            .into()
+            let rows = self
+                .filtered_commands
+                .iter()
+                .enumerate()
+                .map(|(index, command)| {
+                    let label = command.label.clone();
+                    let message = command.message.clone();
+                    let is_selected = index == selected_index;
+
+                    button(text(label).size(12))
+                        .on_press(message)
+                        .width(Length::Fill)
+                        .style(move |theme: &Theme, status| button::Style {
+                            background: Some(Background::Color(if is_selected {
+                                theme.palette().background.stronger.color
+                            } else {
+                                theme.palette().background.weak.color
+                            })),
+                            text_color: theme.palette().background.weak.text,
+                            ..button::primary(theme, status)
+                        })
+                        .padding([4, 4])
+                        .into()
+                })
+                .collect();
+
+            Palette::new(&self.search_query, rows)
+                .on_input(Message::InputChanged)
+                .on_select_next(Message::SelectNext)
+                .on_select_previous(Message::SelectPrevious)
+                .on_hover(Message::Hovered)
+                .into()
         })
     }
 
@@ -109,9 +133,7 @@ impl CommandPalette {
                 Task::none()
             }
             Message::Hovered(index) => {
-                if index != self.selected_command_index {
-                    self.selected_command_index = index;
-                }
+                self.selected_command_index = index;
                 Task::none()
             }
             Message::ExploreSchema => Task::none(),
