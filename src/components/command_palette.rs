@@ -7,25 +7,25 @@ use crate::widgets::palette::Palette;
 pub struct CommandPalette {
     is_visible: bool,
     search_query: String,
-    commands: Vec<Command>,
-    filtered_commands: Vec<Command>,
+    commands: Vec<CommandItem>,
+    filtered_commands: Vec<CommandItem>,
     selected_command_index: usize,
 }
 
 impl Default for CommandPalette {
     fn default() -> Self {
         let commands = vec![
-            Command {
+            CommandItem {
                 label: String::from("Explore schema"),
-                message: Message::ExploreSchema,
+                message: Message::Command(CommandAction::ExploreSchema),
             },
-            Command {
+            CommandItem {
                 label: String::from("Connect to"),
-                message: Message::ConnectTo,
+                message: Message::Command(CommandAction::ConnectTo),
             },
-            Command {
+            CommandItem {
                 label: String::from("Settings"),
-                message: Message::Settings,
+                message: Message::Command(CommandAction::Settings),
             },
         ];
 
@@ -47,13 +47,18 @@ pub enum Message {
     SelectNext,
     SelectPrevious,
     Hovered(usize),
+    Command(CommandAction),
+}
+
+#[derive(Debug, Clone)]
+pub enum CommandAction {
     ExploreSchema,
     ConnectTo,
     Settings,
 }
 
 #[derive(Debug, Clone)]
-pub struct Command {
+pub struct CommandItem {
     pub label: String,
     pub message: Message,
 }
@@ -136,9 +141,15 @@ impl CommandPalette {
                 self.selected_command_index = index;
                 Task::none()
             }
-            Message::ExploreSchema => Task::none(),
-            Message::ConnectTo => Task::none(),
-            Message::Settings => Task::none(),
+            Message::Command(command) => self.handle_command(command),
+        }
+    }
+
+    fn handle_command(&mut self, command: CommandAction) -> Task<Message> {
+        match command {
+            CommandAction::ExploreSchema => Task::none(),
+            CommandAction::ConnectTo => Task::none(),
+            CommandAction::Settings => Task::none(),
         }
     }
 
@@ -147,7 +158,7 @@ impl CommandPalette {
     }
 }
 
-fn filter_commands(commands: &[Command], search_query: &str) -> Vec<Command> {
+fn filter_commands(commands: &[CommandItem], search_query: &str) -> Vec<CommandItem> {
     commands
         .iter()
         .filter(|command| {
