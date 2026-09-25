@@ -2,9 +2,9 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::Renderer as _;
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Shell, mouse, overlay, renderer};
-use iced::widget::{Column, container, rule};
+use iced::widget::{Column, container, rule, scrollable};
 use iced::{
-    Alignment, Background, Element, Event, Length, Padding, Rectangle, Size, Theme, Vector,
+    Alignment, Background, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Vector,
     keyboard,
 };
 
@@ -12,6 +12,18 @@ use crate::widgets::raw_text_input::RawTextInput;
 
 const PALETTE_WIDTH: f32 = 500.0;
 const PALETTE_HEIGHT: f32 = 300.0;
+
+/// Height of a single command row. Matches the row button's fixed height in
+/// `command_palette.rs` and is used to compute scroll targets.
+pub const ROW_HEIGHT: f32 = 24.0;
+/// Vertical spacing between command rows.
+pub const ROW_SPACING: f32 = 2.0;
+/// Vertical padding applied to the command list column.
+pub const LIST_PADDING: f32 = 4.0;
+/// Distance between the top of one row and the top of the next.
+pub const ROW_STRIDE: f32 = ROW_HEIGHT + ROW_SPACING;
+/// Widget id for the scrollable command list, used to scroll it into view.
+pub const SCROLLABLE_ID: &'static str = "command_palette_scrollable";
 
 pub struct Palette<'a, Message>
 where
@@ -23,6 +35,7 @@ where
     on_select_next: Option<Message>,
     on_select_previous: Option<Message>,
     on_hover: Option<Box<dyn Fn(usize) -> Message + 'a>>,
+    scroll_offset: f32,
     width: Length,
     height: Length,
     padding: Padding,
@@ -43,20 +56,36 @@ impl<'a, Message> Palette<'a, Message>
 where
     Message: Clone + 'a,
 {
-    pub fn new(search_query: &'a str, rows: Vec<Element<'a, Message>>) -> Self {
+    pub fn new(
+        search_query: &'a str,
+        rows: Vec<Element<'a, Message>>,
+        on_scroll: impl Fn(scrollable::Viewport) -> Message + 'a,
+    ) -> Self {
         Self {
             children: vec![
                 container(RawTextInput::new("Search").value(search_query))
                     .padding([0, 4])
                     .into(),
                 rule::horizontal(1.0).into(),
-                Column::from_vec(rows).spacing(2).padding(4).into(),
+                scrollable(
+                    Column::from_vec(rows)
+                        .spacing(ROW_SPACING)
+                        .padding(LIST_PADDING),
+                )
+                .id(SCROLLABLE_ID)
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::hidden(),
+                ))
+                .height(Length::Fill)
+                .on_scroll(on_scroll)
+                .into(),
             ],
             input_value: search_query.to_string(),
             on_input: None,
             on_select_next: None,
             on_select_previous: None,
             on_hover: None,
+            scroll_offset: 0.0,
             width: Length::Fixed(PALETTE_WIDTH),
             height: Length::Fixed(PALETTE_HEIGHT),
             padding: Padding::ZERO,
@@ -81,6 +110,11 @@ where
 
     pub fn on_hover(mut self, on_hover: impl Fn(usize) -> Message + 'a) -> Self {
         self.on_hover = Some(Box::new(on_hover));
+        self
+    }
+
+    pub fn scroll_offset(mut self, offset: f32) -> Self {
+        self.scroll_offset = offset;
         self
     }
 }
@@ -203,16 +237,21 @@ where
         }
 
         if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event {
-            let index = layout
-                .child(2)
-                .children()
-                .enumerate()
-                .find(|(_, row)| cursor.is_over(row.bounds()))
-                .map(|(index, _)| index);
+            if let Some(position) = cursor.position() {
+                let content_position = Point::new(position.x, position.y + self.scroll_offset);
 
-            if let Some(index) = index {
-                if let Some(on_hover) = &self.on_hover {
-                    shell.publish(on_hover(index));
+                if let Some(content) = layout.child(2).children().next() {
+                    let index = content
+                        .children()
+                        .enumerate()
+                        .find(|(_, row)| row.bounds().contains(content_position))
+                        .map(|(index, _)| index);
+
+                    if let Some(index) = index {
+                        if let Some(on_hover) = &self.on_hover {
+                            shell.publish(on_hover(index));
+                        }
+                    }
                 }
             }
         }
