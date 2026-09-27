@@ -12,15 +12,20 @@ use rig_core::providers::openai;
 use rig_core::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
 use rig_core::{OneOrMany, model::ModelList};
 use tracing::info;
+use uuid::Uuid;
 
 use crate::components::chat_msg::Role;
 use crate::core::{agent_tools::Tools, configured_provider::ConfiguredProvider};
 
-const USER_AGENT: &str = "opencode/1.18.16";
-
 fn user_agent_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert("user-agent", HeaderValue::from_static(USER_AGENT));
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        HeaderValue::from_static("opencode/1.18.32"),
+    );
+
+    let session_id = Uuid::new_v4().to_string();
+    headers.insert("x-opencode-session", session_id.parse().unwrap());
     headers
 }
 
