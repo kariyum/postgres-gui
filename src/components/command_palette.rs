@@ -73,6 +73,7 @@ pub enum Message {
     Toggle,
     Hide,
     Palette(PaletteMessage),
+    ExploreSchema,
 }
 
 #[derive(Debug, Clone)]
@@ -135,12 +136,18 @@ impl CommandPalette {
                     }
                 }
             },
+            Message::ExploreSchema => Task::none(),
         }
     }
 
     fn handle_command(&mut self, command: CommandAction) -> Task<Message> {
         match command {
-            CommandAction::ExploreSchema => Task::none(),
+            CommandAction::ExploreSchema => {
+                self.is_visible = false;
+                self.search_query.clear();
+                self.refresh_filtered_commands();
+                Task::done(Message::ExploreSchema)
+            }
             CommandAction::ConnectTo => Task::none(),
             CommandAction::Settings => Task::none(),
             CommandAction::Quit => todo!(),

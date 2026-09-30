@@ -21,12 +21,15 @@ use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage
 use crate::components::editor::{self, Editor};
 use crate::components::editor_config::EditorConfig;
 use crate::components::provider_config::ProviderConfigMessage;
+use crate::components::schema_explorer::{SchemaExplorer, SchemaExplorerMessage};
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::DatabaseKeeperMessage;
 use crate::core::config_loader::{self, AppConfig};
 use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::database_keeper::{self, DatabaseKeeper};
+use crate::db;
+use crate::types::{Schema, SchemaInfo};
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -59,6 +62,21 @@ pub enum Message {
     DialogMessage(DialogMessage),
     DatabaseKeeperReady(Sender<DatabaseKeeperMessage>),
     CommandPalette(command_palette::Message),
+    SchemaExplorer(SchemaExplorerMessage),
+    OpenSchemaExplorer,
+    FetchSchema {
+        connection: String,
+        pool: sqlx::PgPool,
+    },
+    SchemaFetched {
+        connection: String,
+        result: Result<Vec<SchemaInfo>, String>,
+    },
+    SchemaLoaded {
+        connection: String,
+        result: Result<Schema, String>,
+    },
+    Escape,
 }
 
 #[derive(Debug)]
@@ -86,6 +104,7 @@ pub struct App {
     database_keeper_actor_tx: Option<Sender<DatabaseKeeperMessage>>,
     app_config: AppConfig,
     command_palette: CommandPalette,
+    schema_explorer: SchemaExplorer,
 }
 
 impl Default for App {
@@ -109,6 +128,7 @@ impl Default for App {
             database_keeper_actor_tx: None,
             app_config: AppConfig::default(),
             command_palette: CommandPalette::default(),
+            schema_explorer: SchemaExplorer::default(),
         }
     }
 }
@@ -435,10 +455,53 @@ impl App {
                 .dialog
                 .update(dialog_message)
                 .map(Message::DialogMessage),
-            Message::CommandPalette(message) => self
-                .command_palette
+            Message::CommandPalette(message) => match message {
+                command_palette::Message::ExploreSchema => self.open_schema_explorer(),
+                _ => self
+                    .command_palette
+                    .update(message)
+                    .map(Message::CommandPalette),
+            },
+            Message::SchemaExplorer(message) => self
+                .schema_explorer
                 .update(message)
-                .map(Message::CommandPalette),
+                .map(Message::SchemaExplorer),
+            Message::OpenSchemaExplorer => self.open_schema_explorer(),
+            Message::FetchSchema { connection, pool } => Task::perform(
+                async move { db::fetch_schema(&pool).await },
+                move |result| Message::SchemaFetched { connection, result },
+            ),
+            Message::SchemaFetched { connection, result } => {
+                if let Some(ref tx) = self.database_keeper_actor_tx {
+                    let mut tx = tx.clone();
+                    Task::perform(
+                        async move {
+                            tx.send(DatabaseKeeperMessage::SchemaFetched { connection, result })
+                                .await
+                                .context("send schema to database keeper")
+                        },
+                        |res| {
+                            if let Err(err) = res {
+                                error!("{err}");
+                            }
+                            Message::Noop
+                        },
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::SchemaLoaded { connection, result } => self
+                .schema_explorer
+                .update(SchemaExplorerMessage::SchemaLoaded { connection, result })
+                .map(Message::SchemaExplorer),
+            Message::Escape => {
+                if self.schema_explorer.is_visible() {
+                    Task::done(Message::SchemaExplorer(SchemaExplorerMessage::Close))
+                } else {
+                    Task::done(Message::CommandPalette(command_palette::Message::Hide))
+                }
+            }
         }
     }
 
@@ -450,6 +513,20 @@ impl App {
         ) {
             self.agent_chat_pane = Some(agent_pane);
         }
+    }
+
+    fn open_schema_explorer(&mut self) -> Task<Message> {
+        self.menu_open = false;
+        self.agent_menu_open = false;
+        let names: Vec<String> = self
+            .app_config
+            .connections
+            .iter()
+            .map(|cfg| cfg.name.clone())
+            .collect();
+        let tx = self.database_keeper_actor_tx.clone();
+        self.schema_explorer.open(names, tx);
+        Task::none()
     }
 
     fn save_config(&self) -> Task<Message> {
@@ -549,7 +626,8 @@ impl App {
         let dialog = self
             .view_command_palette()
             .or(self.view_connection_manager_dialog())
-            .or(self.view_settings_dialog());
+            .or(self.view_settings_dialog())
+            .or(self.view_schema_explorer());
 
         let layout = container(column![
             self.view_title_bar(),
@@ -597,21 +675,26 @@ impl App {
         .into()
     }
 
-    fn view_settings_dialog(&self) -> Option<container::Container<'_, Message>> {
+    fn view_settings_dialog(&self) -> Option<Element<'_, Message>> {
         self.settings.view().map(|dialog| {
-            container(dialog.map(Message::Settings))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
-                .style(|_: &Theme| iced::widget::container::Style {
-                    background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                    ..Default::default()
-                })
+            mouse_area(
+                container(dialog.map(Message::Settings))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center)
+                    .style(|_: &Theme| iced::widget::container::Style {
+                        background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                        ..Default::default()
+                    }),
+            )
+            .interaction(mouse::Interaction::Idle)
+            .on_press(Message::Noop)
+            .into()
         })
     }
 
-    fn view_command_palette(&self) -> Option<container::Container<'_, Message>> {
+    fn view_command_palette(&self) -> Option<Element<'_, Message>> {
         self.command_palette.view().map(|cmd| {
             container(cmd.map(Message::CommandPalette))
                 .width(Length::Fill)
@@ -619,21 +702,60 @@ impl App {
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Start)
                 .padding([100, 0])
+                .into()
         })
     }
 
-    fn view_connection_manager_dialog(&self) -> Option<container::Container<'_, Message>> {
+    fn view_connection_manager_dialog(&self) -> Option<Element<'_, Message>> {
         self.dialog.view().map(|dialog| {
-            container(dialog.map(|msg| Message::DialogMessage(msg)))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
-                .style(|_: &Theme| iced::widget::container::Style {
-                    background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                    ..Default::default()
-                })
+            mouse_area(
+                container(dialog.map(|msg| Message::DialogMessage(msg)))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center)
+                    .style(|_: &Theme| iced::widget::container::Style {
+                        background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                        ..Default::default()
+                    }),
+            )
+            .interaction(mouse::Interaction::Idle)
+            .on_press(Message::Noop)
+            .into()
         })
+    }
+
+    fn view_schema_explorer(&self) -> Option<Element<'_, Message>> {
+        let dialog = self.schema_explorer.view()?.map(Message::SchemaExplorer);
+
+        if self.schema_explorer.is_selecting_connection() {
+            Some(
+                container(dialog)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Start)
+                    .padding([100, 0])
+                    .into(),
+            )
+        } else {
+            Some(
+                mouse_area(
+                    container(dialog)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(iced::Alignment::Center)
+                        .align_y(iced::Alignment::Center)
+                        .style(|_: &Theme| iced::widget::container::Style {
+                            background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
+                            ..Default::default()
+                        }),
+                )
+                .interaction(mouse::Interaction::Idle)
+                .on_press(Message::Noop)
+                .into(),
+            )
+        }
     }
 
     fn view_configs(&self) -> Element<'_, Message> {
@@ -771,7 +893,7 @@ impl App {
                         Some(Message::CommandPalette(command_palette::Message::Toggle))
                     }
                     (_, iced::keyboard::Key::Named(Named::Escape)) => {
-                        Some(Message::CommandPalette(command_palette::Message::Hide))
+                        Some(Message::Escape)
                     }
                     _ => None,
                 }
@@ -785,6 +907,14 @@ impl App {
             column![
                 button(text("Add Connection").size(13))
                     .on_press(Message::AddConnection)
+                    .padding([6, 12])
+                    .width(Length::Fill)
+                    .style(|_theme, _status| button::Style {
+                        border: border::rounded(0.0),
+                        ..button::subtle(_theme, _status)
+                    }),
+                button(text("Explore Schema").size(13))
+                    .on_press(Message::OpenSchemaExplorer)
                     .padding([6, 12])
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style {

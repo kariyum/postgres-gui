@@ -52,3 +52,33 @@ pub struct TreeNode {
     /// For Schema/Table nodes, the qualified parent path (e.g. schema name)
     pub schema: Option<String>,
 }
+
+/// A column in a table's schema definition.
+#[derive(Debug, Clone)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    #[allow(dead_code)]
+    pub nullable: bool,
+}
+
+/// A table and its columns within a database schema.
+#[derive(Debug, Clone)]
+pub struct TableInfo {
+    pub name: String,
+    pub columns: Vec<ColumnInfo>,
+}
+
+/// A named PostgreSQL schema and its tables.
+#[derive(Debug, Clone)]
+pub struct SchemaInfo {
+    pub name: String,
+    pub tables: Vec<TableInfo>,
+}
+
+/// The full schema catalog for a single connection/database.
+#[derive(Debug, Clone)]
+pub struct Schema {
+    pub connection: String,
+    pub schemas: Vec<SchemaInfo>,
+}

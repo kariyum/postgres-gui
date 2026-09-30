@@ -6,5 +6,6 @@ pub mod connection_dialog;
 pub mod editor;
 pub mod editor_config;
 pub mod provider_config;
+pub mod schema_explorer;
 pub mod settings_dialog;
 pub mod tool_call_entry;

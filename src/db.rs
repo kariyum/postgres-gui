@@ -1,7 +1,7 @@
 use sqlx::{Column, PgPool, Row, TypeInfo};
 use sqlx::postgres::PgPoolOptions;
 
-use crate::types::{QueryResult, ResultColumn, ResultRow, TreeNode};
+use crate::types::{ColumnInfo, QueryResult, ResultColumn, ResultRow, SchemaInfo, TableInfo, TreeNode};
 
 /// Connect to a PostgreSQL database and return a pool.
 pub async fn connect(connection_string: &str) -> Result<PgPool, String> {
@@ -194,4 +194,59 @@ pub async fn fetch_schema_tree(pool: &PgPool) -> Result<Vec<TreeNode>, String> {
     }
 
     Ok(schema_nodes)
+}
+
+/// Fetch the full schema (schemas, tables, and columns) for the schema explorer.
+pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
+    let rows = sqlx::query(
+        "SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable \
+         FROM information_schema.columns c \
+         JOIN information_schema.tables t \
+           ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
+         WHERE c.table_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
+           AND t.table_type = 'BASE TABLE' \
+         ORDER BY c.table_schema, c.table_name, c.ordinal_position",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut schemas: Vec<SchemaInfo> = Vec::new();
+    for row in &rows {
+        let schema_name: String = row.try_get("table_schema").map_err(|e| e.to_string())?;
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let column_name: String = row.try_get("column_name").map_err(|e| e.to_string())?;
+        let data_type: String = row.try_get("data_type").map_err(|e| e.to_string())?;
+        let nullable: String = row.try_get("is_nullable").map_err(|e| e.to_string())?;
+
+        let schema = match schemas.iter_mut().find(|s| s.name == schema_name) {
+            Some(schema) => schema,
+            None => {
+                schemas.push(SchemaInfo {
+                    name: schema_name.clone(),
+                    tables: Vec::new(),
+                });
+                schemas.last_mut().unwrap()
+            }
+        };
+
+        let table = match schema.tables.iter_mut().find(|t| t.name == table_name) {
+            Some(table) => table,
+            None => {
+                schema.tables.push(TableInfo {
+                    name: table_name.clone(),
+                    columns: Vec::new(),
+                });
+                schema.tables.last_mut().unwrap()
+            }
+        };
+
+        table.columns.push(ColumnInfo {
+            name: column_name,
+            data_type,
+            nullable: nullable == "YES",
+        });
+    }
+
+    Ok(schemas)
 }

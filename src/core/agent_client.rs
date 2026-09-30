@@ -2,6 +2,7 @@ use std::format;
 
 use anyhow::Context;
 use iced::futures::{Stream, StreamExt};
+use reqwest::header::HeaderName;
 use serde::{Deserialize, Serialize};
 
 use rig_core::client::{CompletionClient, ModelListingClient};
