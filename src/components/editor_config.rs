@@ -14,7 +14,6 @@ use iced::{
     theme,
     widget::{Column, button, column, container, pane_grid, row, rule, svg, text, text_editor},
 };
-use sqlx::database;
 use tokio::sync::oneshot;
 
 #[derive(Debug, Clone)]
@@ -272,7 +271,7 @@ impl EditorConfig {
         .style(|theme: &Theme| {
             let palette = theme.palette();
             iced::widget::container::Style {
-                background: Some(palette.background.base.color.into()),
+                background: Some(palette.background.weakest.color.into()),
                 border: iced::Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
