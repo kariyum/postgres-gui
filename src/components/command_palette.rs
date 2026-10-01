@@ -33,30 +33,7 @@ impl Default for CommandPalette {
                 label: String::from("Toggle assistant"),
                 action: CommandAction::ToggleAssistant,
             },
-            CommandItem {
-                label: String::from("Toggle assistant"),
-                action: CommandAction::ToggleAssistant,
-            },
-            CommandItem {
-                label: String::from("Toggle assistant"),
-                action: CommandAction::ToggleAssistant,
-            },
-            CommandItem {
-                label: String::from("Toggle assistant"),
-                action: CommandAction::ToggleAssistant,
-            },
-            CommandItem {
-                label: String::from("Toggle assistant"),
-                action: CommandAction::ToggleAssistant,
-            },
-            CommandItem {
-                label: String::from("Toggle assistant"),
-                action: CommandAction::ToggleAssistant,
-            },
-            CommandItem {
-                label: String::from("Toggle assistant"),
-                action: CommandAction::ToggleAssistant,
-            },
+
         ];
 
         Self {
