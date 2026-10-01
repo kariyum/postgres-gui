@@ -235,7 +235,7 @@ impl SchemaExplorer {
             return text("").into();
         };
 
-        let title = format!("Explore Schema: {connection}");
+        let title = format!("Database: {connection}");
 
         let filtered: Vec<&SchemaEntry> = if search.is_empty() {
             entries.iter().collect()
@@ -287,7 +287,7 @@ impl SchemaExplorer {
             scrollable(list).height(Length::Fill)
         ]
         .spacing(14)
-        .padding(24)
+        .padding(8)
         .width(Length::Fixed(520.0))
         .height(Length::Fixed(480.0));
 
@@ -301,12 +301,7 @@ impl SchemaExplorer {
                     border: iced::Border {
                         color: palette.background.strong.color,
                         width: 1.0,
-                        radius: 10.0.into(),
-                    },
-                    shadow: iced::Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-                        offset: iced::Vector::new(0.0, 8.0),
-                        blur_radius: 24.0,
+                        radius: 5.0.into(),
                     },
                     ..Default::default()
                 }
