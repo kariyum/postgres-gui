@@ -15,21 +15,24 @@ use iced::{
     widget::{Column, button, column, container, pane_grid, row, rule, svg, text, text_editor},
 };
 use tokio::sync::oneshot;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EditorId(Uuid);
 
 #[derive(Debug, Clone)]
 pub struct EditorConfig {
+    id: EditorId,
     config: ConnectionConfig,
     database: String,
     editor: text_editor::Content,
     panes: pane_grid::State<PaneKind>,
     editor_pane: pane_grid::Pane,
     table_pane: Option<pane_grid::Pane>,
-    pool: Option<sqlx::PgPool>,
     result: Option<Arc<QueryResult>>,
     error: Option<String>,
     running: bool,
     database_keeper: Sender<DatabaseKeeperMessage>,
-    // query state (idle, running, finished ...)
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +66,7 @@ impl EditorConfig {
     pub fn new(connection_config: ConnectionConfig, tx: Sender<DatabaseKeeperMessage>) -> Self {
         let (pane, editor_pane) = pane_grid::State::new(PaneKind::Editor);
         Self {
+            id: EditorId(Uuid::new_v4()),
             database: connection_config.database.clone(),
             config: connection_config,
             editor: text_editor::Content::new(),
@@ -70,7 +74,6 @@ impl EditorConfig {
             editor_pane,
             database_keeper: tx,
             table_pane: None,
-            pool: None,
             result: None,
             error: None,
             running: false,
@@ -159,6 +162,10 @@ impl EditorConfig {
                 )
             }
         }
+    }
+
+    pub fn id(&self) -> EditorId {
+        self.id
     }
 
     pub fn connection_string(&self) -> String {
@@ -318,3 +325,4 @@ impl EditorConfig {
             .into()
     }
 }
+

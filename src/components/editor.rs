@@ -4,7 +4,7 @@ use iced::{
     widget::{self, Row, column, container, scrollable, space},
 };
 
-use crate::components::editor_config::{self, EditorConfig};
+use crate::components::editor_config::{self, EditorConfig, EditorId};
 
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -15,9 +15,9 @@ pub struct Editor {
 #[derive(Debug, Clone)]
 pub enum Message {
     Add(EditorConfig),
-    Close(EditorConfig),
-    Focus(EditorConfig),
-    EditorConfigMessage(EditorConfig, editor_config::Message), // TODO track only window ID
+    Close(EditorId),
+    Focus(EditorId),
+    EditorConfigMessage(EditorId, editor_config::Message),
 }
 
 impl Default for Editor {
@@ -30,10 +30,8 @@ impl Default for Editor {
 }
 
 impl Editor {
-    fn index_of(&self, editor_config: EditorConfig) -> Option<usize> {
-        self.windows
-            .iter()
-            .position(|config| config.connection_string() == editor_config.connection_string())
+    fn index_of(&self, id: EditorId) -> Option<usize> {
+        self.windows.iter().position(|config| config.id() == id)
     }
 
     pub fn view(&self) -> Option<Element<'_, Message>> {
@@ -55,15 +53,18 @@ impl Editor {
             .get(self.focused_tab_index.unwrap_or(0))
             .context("Did not find EditorConfig in self.windows");
         match window {
-            Ok(window) => column![
-                self.view_header(),
-                window
-                    .view()
-                    .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
-            ]
-            .spacing(0)
-            .padding(0)
-            .into(),
+            Ok(window) => {
+                let id = window.id();
+                column![
+                    self.view_header(),
+                    window
+                        .view()
+                        .map(move |msg| Message::EditorConfigMessage(id, msg))
+                ]
+                .spacing(0)
+                .padding(0)
+                .into()
+            }
 
             Err(err) => {
                 tracing::error!("{err}");
@@ -79,9 +80,10 @@ impl Editor {
                     self.windows
                         .iter()
                         .map(|window| {
+                            let id = window.id();
                             window
                                 .view_header()
-                                .map(|msg| Message::EditorConfigMessage(window.clone(), msg))
+                                .map(move |msg| Message::EditorConfigMessage(id, msg))
                                 .into()
                         })
                         .collect(),
@@ -111,28 +113,26 @@ impl Editor {
                 self.windows.push(editor_config);
                 Task::none()
             }
-            Message::Close(editor_config) => {
-                if let Some(idx) = self.index_of(editor_config) {
+            Message::Close(id) => {
+                if let Some(idx) = self.index_of(id) {
                     self.windows.remove(idx);
                 }
                 Task::none()
             }
-            Message::Focus(editor_config) => {
-                if let Some(index) = self.index_of(editor_config) {
+            Message::Focus(id) => {
+                if let Some(index) = self.index_of(id) {
                     self.focused_tab_index = Some(index);
                 }
                 Task::none()
             }
-            Message::EditorConfigMessage(editor_config, msg) => match msg {
-                editor_config::Message::Select => Task::done(Message::Focus(editor_config)),
-                editor_config::Message::Close => Task::done(Message::Close(editor_config)),
+            Message::EditorConfigMessage(id, msg) => match msg {
+                editor_config::Message::Select => Task::done(Message::Focus(id)),
+                editor_config::Message::Close => Task::done(Message::Close(id)),
                 _ => {
-                    if let Some(idx) = self.windows.iter().position(|win| {
-                        win.connection_string() == editor_config.connection_string()
-                    }) {
-                        self.windows[idx].update(msg).map(move |msg| {
-                            Message::EditorConfigMessage(editor_config.clone(), msg)
-                        })
+                    if let Some(idx) = self.index_of(id) {
+                        self.windows[idx]
+                            .update(msg)
+                            .map(move |msg| Message::EditorConfigMessage(id, msg))
                     } else {
                         Task::none()
                     }
