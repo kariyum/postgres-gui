@@ -4,11 +4,11 @@ use anyhow::Context;
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
 use iced::keyboard::key::Named;
-use iced::widget::pane_grid;
 use iced::widget::space::horizontal;
 use iced::widget::{
     Column, button, column, container, mouse_area, row, rule, scrollable, svg, text,
 };
+use iced::widget::{pane_grid, space};
 use iced::{Border, Color, Element, Length, Point, Task, Theme, alignment, border};
 use iced::{Subscription, mouse, window};
 use tracing::{error, info};
@@ -643,11 +643,8 @@ impl App {
                 .border(iced::Border::default().rounded(12))
         });
 
-        let content: Element<'_, Message> = if let Some(dialog) = dialog {
-            iced::widget::stack![layout, dialog].into()
-        } else {
-            layout.into()
-        };
+        let content: Element<'_, Message> =
+            iced::widget::stack![layout, dialog.unwrap_or(space().into())].into();
 
         if self.is_maximized {
             content.into()
@@ -892,9 +889,7 @@ impl App {
                     {
                         Some(Message::CommandPalette(command_palette::Message::Toggle))
                     }
-                    (_, iced::keyboard::Key::Named(Named::Escape)) => {
-                        Some(Message::Escape)
-                    }
+                    (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
                     _ => None,
                 }
             }
