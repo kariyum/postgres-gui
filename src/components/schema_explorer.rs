@@ -7,6 +7,7 @@ use iced::{Alignment, Color, Element, Length, Task, Theme};
 use crate::core::database_keeper::{self, DatabaseKeeperMessage};
 use crate::types::Schema;
 use crate::widgets::palette::{Palette, PaletteMessage};
+use crate::widgets::raw_text_input::{self, RawTextInput};
 
 #[derive(Debug, Clone)]
 pub struct SchemaExplorer {
@@ -232,10 +233,8 @@ impl SchemaExplorer {
             error,
         } = &self.stage
         else {
-            return text("").into();
+            return space().into();
         };
-
-        let title = format!("Database: {connection}");
 
         let filtered: Vec<&SchemaEntry> = if search.is_empty() {
             entries.iter().collect()
@@ -268,30 +267,22 @@ impl SchemaExplorer {
                 .into()
         };
 
-        let search_input = text_input("Search tables and columns...", search.as_str())
-            .on_input(SchemaExplorerMessage::SearchChanged)
-            .padding(8)
-            .size(14)
-            .width(Length::Fill);
+        let search_input = container(
+            RawTextInput::new("Search tables and columns...")
+                .value(search.as_str())
+                .on_input(SchemaExplorerMessage::SearchChanged),
+        )
+        .width(Length::Fill)
+        .padding([0, 4]);
 
-        let close_btn = button(text("Close").size(14))
-            .on_press(SchemaExplorerMessage::Close)
-            .padding([8, 18])
-            .style(iced::widget::button::secondary);
-
-        let mut form = column![
-            text(title).size(18),
-            rule::horizontal(1),
-            search_input,
-            rule::horizontal(1),
+        let form = column![
+            column![search_input, rule::horizontal(1),],
             scrollable(list).height(Length::Fill)
         ]
-        .spacing(14)
-        .padding(8)
-        .width(Length::Fixed(520.0))
-        .height(Length::Fixed(480.0));
-
-        form = form.push(container(row![space::horizontal(), close_btn].spacing(10)));
+        .spacing(8)
+        .padding(0)
+        .width(Length::Fixed(920.0))
+        .height(Length::Fixed(680.0));
 
         container(form)
             .style(|theme: &Theme| {
@@ -311,11 +302,14 @@ impl SchemaExplorer {
 }
 
 fn entry_row(entry: &SchemaEntry) -> Element<'_, SchemaExplorerMessage> {
-    row![
-        text(entry.full_name.as_str()).size(13).width(Length::Fill),
-        text(entry.detail.as_str()).size(11).style(text::secondary),
-    ]
-    .align_y(Alignment::Center)
+    container(
+        row![
+            text(entry.full_name.as_str()).size(13).width(Length::Fill),
+            text(entry.detail.as_str()).size(11).style(text::secondary),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .padding([4, 0])
     .into()
 }
 

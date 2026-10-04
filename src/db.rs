@@ -137,65 +137,6 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> S
     "NULL".to_string()
 }
 
-/// Fetch schemas and tables for the schema browser.
-pub async fn fetch_schema_tree(pool: &PgPool) -> Result<Vec<TreeNode>, String> {
-    // Get schemas (excluding system ones)
-    let schemas: Vec<String> = sqlx::query_scalar(
-        "SELECT schema_name FROM information_schema.schemata \
-         WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
-         ORDER BY schema_name",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let mut schema_nodes = Vec::new();
-
-    for schema in &schemas {
-        // Get tables for this schema
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT table_name FROM information_schema.tables \
-             WHERE table_schema = $1 AND table_type = 'BASE TABLE' \
-             ORDER BY table_name",
-        )
-        .bind(schema)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
-        let table_nodes: Vec<TreeNode> = tables
-            .iter()
-            .map(|t| TreeNode {
-                kind: crate::types::TreeNodeKind::Table,
-                label: t.clone(),
-                children: Vec::new(),
-                expanded: false,
-                schema: Some(schema.clone()),
-            })
-            .collect();
-
-        let table_group = TreeNode {
-            kind: crate::types::TreeNodeKind::TableGroup,
-            label: format!("Tables ({})", table_nodes.len()),
-            children: table_nodes,
-            expanded: false,
-            schema: Some(schema.clone()),
-        };
-
-        let schema_node = TreeNode {
-            kind: crate::types::TreeNodeKind::Schema,
-            label: schema.clone(),
-            children: vec![table_group],
-            expanded: false,
-            schema: None,
-        };
-
-        schema_nodes.push(schema_node);
-    }
-
-    Ok(schema_nodes)
-}
-
 /// Fetch the full schema (schemas, tables, and columns) for the schema explorer.
 pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
     let rows = sqlx::query(

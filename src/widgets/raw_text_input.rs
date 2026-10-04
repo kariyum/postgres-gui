@@ -12,21 +12,28 @@ const TEXT_SIZE: f32 = 12.0;
 const HORIZONTAL_PADDING: f32 = 4.0;
 
 #[derive(Debug, Clone, Default)]
-pub struct RawTextInput {
+pub struct RawTextInput<T> {
     placeholder: String,
     value: String,
+    on_input_message: Option<fn(String) -> T>,
 }
 
-impl RawTextInput {
+impl<T> RawTextInput<T> {
     pub fn new(placeholder: impl Into<String>) -> Self {
         Self {
             placeholder: placeholder.into(),
             value: String::new(),
+            on_input_message: None,
         }
     }
 
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
+        self
+    }
+
+    pub fn on_input(mut self, f: fn(String) -> T) -> Self {
+        self.on_input_message = Some(f);
         self
     }
 
@@ -36,6 +43,16 @@ impl RawTextInput {
         } else {
             self.value.as_str()
         }
+    }
+}
+
+fn delete_last_word(value: &mut String) {
+    let trimmed = value.trim_end().len();
+    value.truncate(trimmed);
+
+    match value.rfind(|c: char| c.is_whitespace()) {
+        Some(index) => value.truncate(index + 1),
+        None => value.clear(),
     }
 }
 
@@ -78,7 +95,7 @@ fn text_config(content: &str) -> text::Text<&str, iced::Font> {
     }
 }
 
-impl RawTextInput {
+impl<T> RawTextInput<T> {
     fn draw_text<R>(&self, renderer: &mut R, theme: &Theme, bounds: Rectangle)
     where
         R: text::Renderer<Font = iced::Font>,
@@ -116,7 +133,8 @@ impl RawTextInput {
         } else {
             bounds.x
                 + HORIZONTAL_PADDING
-                + R::Paragraph::with_text(text_config(self.content())).min_width() + 1.0
+                + R::Paragraph::with_text(text_config(self.content())).min_width()
+                + 1.0
         };
 
         renderer.fill_quad(
@@ -134,7 +152,7 @@ impl RawTextInput {
     }
 }
 
-impl<Message, R> Widget<Message, iced::Theme, R> for RawTextInput
+impl<Message, R> Widget<Message, iced::Theme, R> for RawTextInput<Message>
 where
     R: text::Renderer<Font = iced::Font>,
 {
@@ -184,8 +202,40 @@ where
 
                 shell.request_redraw_at(*now + Duration::from_millis(millis_until_next as u64));
             }
-            Event::Keyboard(keyboard::Event::KeyPressed { .. }) => {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                text,
+                modifiers,
+                ..
+            }) => {
                 state.updated_at = Instant::now();
+
+                let len_before = self.value.len();
+
+                match key.as_ref() {
+                    keyboard::Key::Named(keyboard::key::Named::Backspace) => {
+                        if modifiers.control() {
+                            delete_last_word(&mut self.value);
+                        } else {
+                            self.value.pop();
+                        }
+                    }
+                    _ if modifiers.control() => {}
+                    _ => {
+                        if let Some(text) = text {
+                            if let Some(c) = text.chars().next().filter(|c| !c.is_control()) {
+                                self.value.push(c);
+                            }
+                        }
+                    }
+                }
+
+                if self.value.len() != len_before {
+                    if let Some(on_input) = self.on_input_message {
+                        shell.publish(on_input(self.value.clone()));
+                    }
+                }
+
                 shell.request_redraw();
             }
             _ => {}
@@ -225,8 +275,11 @@ where
     }
 }
 
-impl<Message> From<RawTextInput> for Element<'_, Message> {
-    fn from(value: RawTextInput) -> Self {
+impl<'a, Message> From<RawTextInput<Message>> for Element<'a, Message>
+where
+    Message: 'a,
+{
+    fn from(value: RawTextInput<Message>) -> Self {
         Self::new(value)
     }
 }

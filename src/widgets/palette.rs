@@ -53,16 +53,7 @@ pub struct Palette<'a> {
 #[derive(Debug, Default)]
 struct State {
     selected_index: usize,
-}
-
-fn delete_last_word(value: &mut String) {
-    let trimmed = value.trim_end().len();
-    value.truncate(trimmed);
-
-    match value.rfind(|c: char| c.is_whitespace()) {
-        Some(index) => value.truncate(index + 1),
-        None => value.clear(),
-    }
+    last_query: String,
 }
 
 impl<'a> Palette<'a> {
@@ -92,10 +83,14 @@ impl<'a> Palette<'a> {
             .width(Length::Fill);
 
         let children = vec![
-            container(RawTextInput::new("Search").value(query))
-                .width(Length::Fill)
-                .padding([0, 4])
-                .into(),
+            container(
+                RawTextInput::new("Search")
+                    .value(query)
+                    .on_input(PaletteMessage::InputChanged),
+            )
+            .width(Length::Fill)
+            .padding([0, 4])
+            .into(),
             rule::horizontal(1.0).into(),
             Scrollable::new(column).line_height(ROW_STRIDE).into(),
         ];
@@ -166,6 +161,15 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
     }
 
     fn diff(&mut self, tree: &mut Tree) {
+        let state = tree.state.downcast_mut::<State>();
+        if state.last_query != self.input_value {
+            state.last_query = self.input_value.clone();
+            state.selected_index = 0;
+            if let Some(child) = tree.children.get_mut(SCROLLABLE_CHILD) {
+                child.state.downcast_mut::<ScrollableState>().offset = 0.0;
+            }
+        }
+
         tree.diff_children(&mut self.children);
     }
 
@@ -178,12 +182,14 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
         let size = limits.resolve(self.width, self.height, Size::ZERO);
 
         let full_limits = Limits::new(Size::ZERO, size);
-        let input_node = self.children[0]
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, &full_limits);
-        let rule_node = self.children[1]
-            .as_widget_mut()
-            .layout(&mut tree.children[1], renderer, &full_limits);
+        let input_node =
+            self.children[0]
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, &full_limits);
+        let rule_node =
+            self.children[1]
+                .as_widget_mut()
+                .layout(&mut tree.children[1], renderer, &full_limits);
 
         let input_height = input_node.size().height;
         let rule_height = rule_node.size().height;
@@ -246,33 +252,16 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
         let list_top = bounds.y + header_height;
         let viewport_height = (bounds.height - header_height).max(0.0);
 
-        if let Event::Keyboard(keyboard::Event::KeyPressed {
-            key,
-            text,
-            modifiers,
-            ..
-        }) = event
-        {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event {
             match key.as_ref() {
-                keyboard::Key::Named(keyboard::key::Named::Backspace) => {
-                    if modifiers.control() {
-                        delete_last_word(&mut self.input_value);
-                    } else {
-                        self.input_value.pop();
-                    }
-
-                    tree.state.downcast_mut::<State>().selected_index = 0;
-                    tree.children[SCROLLABLE_CHILD]
-                        .state
-                        .downcast_mut::<ScrollableState>()
-                        .offset = 0.0;
-
-                    shell.publish(PaletteMessage::InputChanged(self.input_value.clone()));
-                }
                 keyboard::Key::Named(keyboard::key::Named::Enter) => {
                     let count = self.labels.len();
                     if count > 0 {
-                        let index = tree.state.downcast_ref::<State>().selected_index.min(count - 1);
+                        let index = tree
+                            .state
+                            .downcast_ref::<State>()
+                            .selected_index
+                            .min(count - 1);
                         shell.publish(PaletteMessage::Activated(index));
                     }
                 }
@@ -309,21 +298,7 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
                         shell.request_redraw();
                     }
                 }
-                keyboard::Key::Named(keyboard::key::Named::Escape) => {}
-                _ if modifiers.control() => {}
-                _ => {
-                    if let Some(text) = text {
-                        self.input_value.push_str(text);
-
-                        tree.state.downcast_mut::<State>().selected_index = 0;
-                        tree.children[SCROLLABLE_CHILD]
-                            .state
-                            .downcast_mut::<ScrollableState>()
-                            .offset = 0.0;
-
-                        shell.publish(PaletteMessage::InputChanged(self.input_value.clone()));
-                    }
-                }
+                _ => {}
             }
         }
 
@@ -444,7 +419,9 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
             .offset;
 
         renderer.with_layer(list_area, |renderer| {
-            let selected = state.selected_index.min(self.labels.len().saturating_sub(1));
+            let selected = state
+                .selected_index
+                .min(self.labels.len().saturating_sub(1));
 
             if !self.labels.is_empty() {
                 let row_rect = Rectangle {
