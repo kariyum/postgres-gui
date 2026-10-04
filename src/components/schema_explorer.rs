@@ -2,7 +2,7 @@ use iced::futures::channel::mpsc::Sender;
 use iced::widget::{
     Column, button, column, container, row, rule, scrollable, space, text, text_input,
 };
-use iced::{Alignment, Color, Element, Length, Task, Theme};
+use iced::{Alignment, Color, Element, Length, Task, Theme, border};
 
 use crate::core::database_keeper::{self, DatabaseKeeperMessage};
 use crate::types::Schema;
@@ -26,6 +26,7 @@ enum Stage {
     Browse {
         connection: String,
         entries: Vec<SchemaEntry>,
+        schema: Schema,
         search: String,
         loading: bool,
         error: Option<String>,
@@ -47,6 +48,7 @@ pub enum SchemaExplorerMessage {
         result: Result<Schema, String>,
     },
     Close,
+    SchemaFilter(String),
 }
 
 impl Default for SchemaExplorer {
@@ -132,17 +134,19 @@ impl SchemaExplorer {
                 self.close();
                 Task::none()
             }
+            SchemaExplorerMessage::SchemaFilter(_) => todo!(),
         }
     }
 
     fn select_connection(&mut self, name: String) -> Task<SchemaExplorerMessage> {
         let Some(mut actor) = self.database_keeper.clone() else {
             self.stage = Stage::Browse {
-                connection: name,
+                connection: name.clone(),
                 entries: Vec::new(),
                 search: String::new(),
                 loading: false,
                 error: Some("Database service not ready".into()),
+                schema: Schema::new(name),
             };
             return Task::none();
         };
@@ -151,6 +155,7 @@ impl SchemaExplorer {
             connection: name.clone(),
             entries: Vec::new(),
             search: String::new(),
+            schema: Schema::new(name.clone()),
             loading: true,
             error: None,
         };
@@ -175,6 +180,7 @@ impl SchemaExplorer {
                     entries: e,
                     loading,
                     error,
+                    schema: s,
                     ..
                 } = &mut self.stage
                 {
@@ -182,6 +188,7 @@ impl SchemaExplorer {
                         *e = entries;
                         *loading = false;
                         *error = None;
+                        *s = schema.clone();
                     }
                 }
             }
@@ -226,11 +233,12 @@ impl SchemaExplorer {
 
     fn view_browse(&self) -> Element<'_, SchemaExplorerMessage> {
         let Stage::Browse {
-            connection,
+            connection: _,
             entries,
             search,
             loading,
             error,
+            schema,
         } = &self.stage
         else {
             return space().into();
@@ -276,7 +284,11 @@ impl SchemaExplorer {
         .padding([0, 4]);
 
         let form = column![
-            column![search_input, rule::horizontal(1),],
+            column![
+                search_input,
+                rule::horizontal(1),
+                self.view_quick_filter(schema)
+            ],
             scrollable(list).height(Length::Fill)
         ]
         .spacing(8)
@@ -298,6 +310,30 @@ impl SchemaExplorer {
                 }
             })
             .into()
+    }
+
+    fn view_quick_filter(&self, schema: &Schema) -> Element<'_, SchemaExplorerMessage> {
+        container(
+            row![text("Quick Filters: ").size(12),]
+                .extend(schema.schemas.iter().map(|schema_details| {
+                    button(text(schema_details.name.clone()).size(12))
+                        .on_press(SchemaExplorerMessage::SchemaFilter(
+                            schema_details.name.clone(),
+                        ))
+                        .padding([0, 8])
+                        .style(|theme, status| {
+                            let base = button::primary(theme, status);
+                            button::Style {
+                                border: border::Border::default().rounded(999.0),
+                                ..base
+                            }
+                        })
+                        .into()
+                }))
+                .wrap(),
+        )
+        .padding([4, 4])
+        .into()
     }
 }
 
