@@ -48,7 +48,14 @@ pub enum SchemaExplorerMessage {
         result: Result<Schema, String>,
     },
     Close,
-    SchemaFilter(String),
+    SchemaFilter(SchemaFilter),
+}
+
+#[derive(Debug, Clone)]
+pub enum SchemaFilter {
+    Schemas,
+    Tables,
+    Columns,
 }
 
 impl Default for SchemaExplorer {
@@ -134,7 +141,7 @@ impl SchemaExplorer {
                 self.close();
                 Task::none()
             }
-            SchemaExplorerMessage::SchemaFilter(_) => todo!(),
+            SchemaExplorerMessage::SchemaFilter(filter) => Task::none(),
         }
     }
 
@@ -313,23 +320,32 @@ impl SchemaExplorer {
     }
 
     fn view_quick_filter(&self, schema: &Schema) -> Element<'_, SchemaExplorerMessage> {
+        let filters: Vec<Element<'_, SchemaExplorerMessage>> = vec![
+            button(text("Schemas").size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Schemas)),
+            button(text("Tables").size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Tables)),
+            button(text("Columns").size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Columns)),
+        ]
+        .into_iter()
+        .map(|btn| {
+            btn.padding([0, 8])
+                .style(|theme, status| {
+                    let base = button::primary(theme, status);
+                    button::Style {
+                        border: border::Border::default().rounded(999.0),
+                        ..base
+                    }
+                })
+                .into()
+        })
+        .collect();
+
         container(
             row![text("Quick Filters: ").size(12),]
-                .extend(schema.schemas.iter().map(|schema_details| {
-                    button(text(schema_details.name.clone()).size(12))
-                        .on_press(SchemaExplorerMessage::SchemaFilter(
-                            schema_details.name.clone(),
-                        ))
-                        .padding([0, 8])
-                        .style(|theme, status| {
-                            let base = button::primary(theme, status);
-                            button::Style {
-                                border: border::Border::default().rounded(999.0),
-                                ..base
-                            }
-                        })
-                        .into()
-                }))
+                .extend(filters)
+                .spacing(4)
                 .wrap(),
         )
         .padding([4, 4])
