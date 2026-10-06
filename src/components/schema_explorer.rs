@@ -1,6 +1,6 @@
 use iced::futures::channel::mpsc::Sender;
 use iced::widget::{
-    Column, button, column, container, row, rule, scrollable, space, text, text_input,
+    Column, Row, button, column, container, row, rule, scrollable, space, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Task, Theme, border};
 
@@ -10,10 +10,60 @@ use crate::widgets::palette::{Palette, PaletteMessage};
 use crate::widgets::raw_text_input::{self, RawTextInput};
 
 #[derive(Debug, Clone)]
+pub struct DatabaseMetadata {
+    pub connection: String,
+    pub schemas: Vec<Metadata>,
+}
+impl DatabaseMetadata {
+    pub fn new(connection: String) -> Self {
+        Self {
+            connection,
+            schemas: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableMetadata {
+    schema: String,
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum Metadata {
+    Schema(SchemaMetadata),
+    Table(TableMetadata),
+    Column(ColumnMetadata),
+}
+
+#[derive(Debug, Clone)]
+pub struct SchemaMetadata {
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ColumnMetadata {
+    schema_name: String,
+    table_name: String,
+    name: String,
+}
+#[derive(Debug, Clone)]
 pub struct SchemaExplorer {
     visible: bool,
     stage: Stage,
     database_keeper: Option<Sender<DatabaseKeeperMessage>>,
+}
+
+#[derive(Debug, Clone)]
+struct Browse {
+    connection: String,
+    entries: Vec<SchemaEntry>,
+    schema: Schema,
+    metadata: DatabaseMetadata,
+    filtered_metadata: DatabaseMetadata,
+    search: String,
+    loading: bool,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -23,14 +73,7 @@ enum Stage {
         names: Vec<String>,
         filtered: Vec<String>,
     },
-    Browse {
-        connection: String,
-        entries: Vec<SchemaEntry>,
-        schema: Schema,
-        search: String,
-        loading: bool,
-        error: Option<String>,
-    },
+    Browse(Browse),
 }
 
 #[derive(Debug, Clone)]
@@ -124,10 +167,10 @@ impl SchemaExplorer {
                 }
             }
             SchemaExplorerMessage::SearchChanged(search) => {
-                if let Stage::Browse {
+                if let Stage::Browse(Browse {
                     search: ref mut search_field,
                     ..
-                } = self.stage
+                }) = self.stage
                 {
                     *search_field = search;
                 }
@@ -147,25 +190,29 @@ impl SchemaExplorer {
 
     fn select_connection(&mut self, name: String) -> Task<SchemaExplorerMessage> {
         let Some(mut actor) = self.database_keeper.clone() else {
-            self.stage = Stage::Browse {
+            self.stage = Stage::Browse(Browse {
                 connection: name.clone(),
                 entries: Vec::new(),
                 search: String::new(),
                 loading: false,
                 error: Some("Database service not ready".into()),
-                schema: Schema::new(name),
-            };
+                schema: Schema::new(name.clone()),
+                filtered_metadata: DatabaseMetadata::new(name.clone()),
+                metadata: DatabaseMetadata::new(name),
+            });
             return Task::none();
         };
 
-        self.stage = Stage::Browse {
+        self.stage = Stage::Browse(Browse {
             connection: name.clone(),
             entries: Vec::new(),
             search: String::new(),
             schema: Schema::new(name.clone()),
             loading: true,
             error: None,
-        };
+            filtered_metadata: DatabaseMetadata::new(name.clone()),
+            metadata: DatabaseMetadata::new(name.clone()),
+        });
 
         let connection = name.clone();
         Task::perform(
@@ -182,14 +229,14 @@ impl SchemaExplorer {
         match result {
             Ok(schema) => {
                 let entries = flatten(&schema);
-                if let Stage::Browse {
+                if let Stage::Browse(Browse {
                     connection: c,
                     entries: e,
                     loading,
                     error,
                     schema: s,
                     ..
-                } = &mut self.stage
+                }) = &mut self.stage
                 {
                     if *c == connection {
                         *e = entries;
@@ -200,12 +247,12 @@ impl SchemaExplorer {
                 }
             }
             Err(e) => {
-                if let Stage::Browse {
+                if let Stage::Browse(Browse {
                     connection: c,
                     loading,
                     error,
                     ..
-                } = &mut self.stage
+                }) = &mut self.stage
                 {
                     if *c == connection {
                         if e == "Schema is still loading" {
@@ -234,36 +281,75 @@ impl SchemaExplorer {
                     Palette::new(query.as_str(), labels).into();
                 Some(palette.map(SchemaExplorerMessage::ConnectionPalette))
             }
-            Stage::Browse { .. } => Some(self.view_browse()),
+            Stage::Browse(browse) => Some(self.view_browse(browse)),
         }
     }
 
-    fn view_browse(&self) -> Element<'_, SchemaExplorerMessage> {
-        let Stage::Browse {
-            connection: _,
+    fn view_quick_filter(&self) -> Element<'_, SchemaExplorerMessage> {
+        let filters: Vec<Element<'_, SchemaExplorerMessage>> = vec![
+            button(text("Schemas").size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Schemas)),
+            button(text("Tables").size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Tables)),
+            button(text("Columns").size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Columns)),
+        ]
+        .into_iter()
+        .map(|btn| {
+            btn.padding([0, 8])
+                .style(|theme, status| {
+                    let base = button::primary(theme, status);
+                    button::Style {
+                        border: border::Border::default().rounded(999.0),
+                        ..base
+                    }
+                })
+                .into()
+        })
+        .collect();
+
+        container(
+            row![text("Quick Filters: ").size(12),]
+                .extend(filters)
+                .spacing(4)
+                .wrap(),
+        )
+        .padding([4, 8])
+        .into()
+    }
+
+    fn view_details(&self) -> Element<'_, SchemaExplorerMessage> {
+        container(text("ok")).into()
+    }
+
+    fn view_schema_list<'a>(
+        &'a self,
+        database_metadata: &'a DatabaseMetadata,
+    ) -> Element<'a, SchemaExplorerMessage> {
+        Row::from_iter(
+            database_metadata
+                .schemas
+                .iter()
+                .map(|metadata| match metadata {
+                    Metadata::Schema(schema_metadata) => view_schema_metadata(schema_metadata),
+                    Metadata::Table(table_metadata) => view_table_metadata(table_metadata),
+                    Metadata::Column(column_metadata) => view_column_metadata(column_metadata),
+                }),
+        )
+        .into()
+    }
+
+    fn view_browse<'a>(&'a self, browse: &'a Browse) -> Element<'a, SchemaExplorerMessage> {
+        let Browse {
+            connection,
             entries,
+            schema,
+            metadata,
+            filtered_metadata,
             search,
             loading,
             error,
-            schema,
-        } = &self.stage
-        else {
-            return space().into();
-        };
-
-        let filtered: Vec<&SchemaEntry> = if search.is_empty() {
-            entries.iter().collect()
-        } else {
-            let needle = search.to_lowercase();
-            entries
-                .iter()
-                .filter(|e| {
-                    e.full_name.to_lowercase().contains(&needle)
-                        || e.detail.to_lowercase().contains(&needle)
-                })
-                .collect()
-        };
-
+        } = browse;
         let list: Element<'_, SchemaExplorerMessage> = if *loading {
             text("Loading schema...")
                 .size(13)
@@ -274,12 +360,10 @@ impl SchemaExplorer {
                 .size(13)
                 .color(crate::theme::DANGER)
                 .into()
-        } else if filtered.is_empty() {
+        } else if filtered_metadata.schemas.is_empty() {
             text("No results.").size(13).style(text::secondary).into()
         } else {
-            Column::from_vec(filtered.into_iter().map(entry_row).collect())
-                .spacing(2)
-                .into()
+            self.view_schema_list(filtered_metadata).into()
         };
 
         let search_input = container(
@@ -326,43 +410,30 @@ impl SchemaExplorer {
             })
             .into()
     }
+}
 
-    fn view_quick_filter(&self) -> Element<'_, SchemaExplorerMessage> {
-        let filters: Vec<Element<'_, SchemaExplorerMessage>> = vec![
-            button(text("Schemas").size(12))
-                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Schemas)),
-            button(text("Tables").size(12))
-                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Tables)),
-            button(text("Columns").size(12))
-                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Columns)),
-        ]
-        .into_iter()
-        .map(|btn| {
-            btn.padding([0, 8])
-                .style(|theme, status| {
-                    let base = button::primary(theme, status);
-                    button::Style {
-                        border: border::Border::default().rounded(999.0),
-                        ..base
-                    }
-                })
-                .into()
-        })
-        .collect();
+fn view_column_metadata(column_metadata: &ColumnMetadata) -> Element<'_, SchemaExplorerMessage> {
+    button(row![
+        text(column_metadata.schema_name.as_str()),
+        text("."),
+        text(column_metadata.table_name.as_str()),
+        text("."),
+        text(column_metadata.name.as_str())
+    ])
+    .into()
+}
 
-        container(
-            row![text("Quick Filters: ").size(12),]
-                .extend(filters)
-                .spacing(4)
-                .wrap(),
-        )
-        .padding([4, 8])
-        .into()
-    }
+fn view_table_metadata(table_metadata: &TableMetadata) -> Element<'_, SchemaExplorerMessage> {
+    button(row![
+        text(table_metadata.schema.as_str()),
+        text("."),
+        text(table_metadata.name.as_str())
+    ])
+    .into()
+}
 
-    fn view_details(&self) -> Element<'_, SchemaExplorerMessage> {
-        container(text("ok")).into()
-    }
+fn view_schema_metadata(schema_metadata: &SchemaMetadata) -> Element<'_, SchemaExplorerMessage> {
+    text(schema_metadata.name.as_str()).into()
 }
 
 fn entry_row(entry: &SchemaEntry) -> Element<'_, SchemaExplorerMessage> {

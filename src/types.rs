@@ -83,6 +83,8 @@ pub struct Schema {
     pub schemas: Vec<SchemaInfo>,
 }
 
+
+
 impl Schema {
     pub fn new(connection: String) -> Schema {
         Self {
