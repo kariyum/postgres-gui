@@ -291,12 +291,20 @@ impl SchemaExplorer {
         .padding([0, 4]);
 
         let form = column![
-            column![
-                search_input,
-                rule::horizontal(1),
-                self.view_quick_filter(schema)
-            ],
-            scrollable(list).height(Length::Fill)
+            column![search_input, rule::horizontal(1), self.view_quick_filter(),],
+            row![
+                scrollable(container(list).padding([0, 8]))
+                    .direction(scrollable::Direction::Vertical(
+                        scrollable::Scrollbar::new().width(4).scroller_width(4),
+                    ))
+                    .height(Length::Fill)
+                    .width(Length::FillPortion(1)),
+                rule::vertical(1),
+                container(self.view_details())
+                    .padding([0, 8])
+                    .height(Length::Fill)
+                    .width(Length::FillPortion(1)),
+            ]
         ]
         .spacing(8)
         .padding(0)
@@ -319,7 +327,7 @@ impl SchemaExplorer {
             .into()
     }
 
-    fn view_quick_filter(&self, schema: &Schema) -> Element<'_, SchemaExplorerMessage> {
+    fn view_quick_filter(&self) -> Element<'_, SchemaExplorerMessage> {
         let filters: Vec<Element<'_, SchemaExplorerMessage>> = vec![
             button(text("Schemas").size(12))
                 .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Schemas)),
@@ -348,8 +356,12 @@ impl SchemaExplorer {
                 .spacing(4)
                 .wrap(),
         )
-        .padding([4, 4])
+        .padding([4, 8])
         .into()
+    }
+
+    fn view_details(&self) -> Element<'_, SchemaExplorerMessage> {
+        container(text("ok")).into()
     }
 }
 
