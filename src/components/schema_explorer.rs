@@ -14,11 +14,48 @@ pub struct DatabaseMetadata {
     pub connection: String,
     pub schemas: Vec<Metadata>,
 }
+
 impl DatabaseMetadata {
     pub fn new(connection: String) -> Self {
         Self {
             connection,
             schemas: Vec::new(),
+        }
+    }
+}
+
+impl From<Schema> for DatabaseMetadata {
+    fn from(schema: Schema) -> Self {
+        let Schema {
+            connection,
+            schemas: schema_infos,
+        } = schema;
+
+        let mut schemas = Vec::new();
+        for schema_info in schema_infos {
+            schemas.push(Metadata::Schema(SchemaMetadata {
+                name: schema_info.name.clone(),
+            }));
+
+            for table in schema_info.tables {
+                schemas.push(Metadata::Table(TableMetadata {
+                    schema: schema_info.name.clone(),
+                    name: table.name.clone(),
+                }));
+
+                for column in table.columns {
+                    schemas.push(Metadata::Column(ColumnMetadata {
+                        schema_name: schema_info.name.clone(),
+                        table_name: table.name.clone(),
+                        name: column.name.clone(),
+                    }));
+                }
+            }
+        }
+
+        Self {
+            connection,
+            schemas,
         }
     }
 }
@@ -57,7 +94,6 @@ pub struct SchemaExplorer {
 #[derive(Debug, Clone)]
 struct Browse {
     connection: String,
-    entries: Vec<SchemaEntry>,
     schema: Schema,
     metadata: DatabaseMetadata,
     filtered_metadata: DatabaseMetadata,
@@ -77,12 +113,6 @@ enum Stage {
 }
 
 #[derive(Debug, Clone)]
-struct SchemaEntry {
-    full_name: String,
-    detail: String,
-}
-
-#[derive(Debug, Clone)]
 pub enum SchemaExplorerMessage {
     ConnectionPalette(PaletteMessage),
     SearchChanged(String),
@@ -92,6 +122,7 @@ pub enum SchemaExplorerMessage {
     },
     Close,
     SchemaFilter(SchemaFilter),
+    SelectDetails(Metadata),
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +216,7 @@ impl SchemaExplorer {
                 Task::none()
             }
             SchemaExplorerMessage::SchemaFilter(filter) => Task::none(),
+            SchemaExplorerMessage::SelectDetails(metadata) => todo!(),
         }
     }
 
@@ -192,7 +224,6 @@ impl SchemaExplorer {
         let Some(mut actor) = self.database_keeper.clone() else {
             self.stage = Stage::Browse(Browse {
                 connection: name.clone(),
-                entries: Vec::new(),
                 search: String::new(),
                 loading: false,
                 error: Some("Database service not ready".into()),
@@ -205,7 +236,6 @@ impl SchemaExplorer {
 
         self.stage = Stage::Browse(Browse {
             connection: name.clone(),
-            entries: Vec::new(),
             search: String::new(),
             schema: Schema::new(name.clone()),
             loading: true,
@@ -228,21 +258,23 @@ impl SchemaExplorer {
     fn handle_schema_loaded(&mut self, connection: String, result: Result<Schema, String>) {
         match result {
             Ok(schema) => {
-                let entries = flatten(&schema);
+                let metadata = DatabaseMetadata::from(schema.clone());
                 if let Stage::Browse(Browse {
                     connection: c,
-                    entries: e,
                     loading,
                     error,
                     schema: s,
+                    metadata: m,
+                    filtered_metadata: fm,
                     ..
                 }) = &mut self.stage
                 {
                     if *c == connection {
-                        *e = entries;
                         *loading = false;
                         *error = None;
-                        *s = schema.clone();
+                        *s = schema;
+                        *m = metadata.clone();
+                        *fm = metadata;
                     }
                 }
             }
@@ -326,7 +358,7 @@ impl SchemaExplorer {
         &'a self,
         database_metadata: &'a DatabaseMetadata,
     ) -> Element<'a, SchemaExplorerMessage> {
-        Row::from_iter(
+        Column::from_iter(
             database_metadata
                 .schemas
                 .iter()
@@ -336,13 +368,13 @@ impl SchemaExplorer {
                     Metadata::Column(column_metadata) => view_column_metadata(column_metadata),
                 }),
         )
+        .spacing(4)
         .into()
     }
 
     fn view_browse<'a>(&'a self, browse: &'a Browse) -> Element<'a, SchemaExplorerMessage> {
         let Browse {
             connection,
-            entries,
             schema,
             metadata,
             filtered_metadata,
@@ -377,7 +409,7 @@ impl SchemaExplorer {
         let form = column![
             column![search_input, rule::horizontal(1), self.view_quick_filter(),],
             row![
-                scrollable(container(list).padding([0, 8]))
+                scrollable(container(list).padding([4, 8]))
                     .direction(scrollable::Direction::Vertical(
                         scrollable::Scrollbar::new().width(4).scroller_width(4),
                     ))
@@ -413,62 +445,43 @@ impl SchemaExplorer {
 }
 
 fn view_column_metadata(column_metadata: &ColumnMetadata) -> Element<'_, SchemaExplorerMessage> {
-    button(row![
-        text(column_metadata.schema_name.as_str()),
-        text("."),
-        text(column_metadata.table_name.as_str()),
-        text("."),
-        text(column_metadata.name.as_str())
-    ])
+    button(
+        row![
+            text(column_metadata.schema_name.as_str()).size(12),
+            text(".").size(12),
+            text(column_metadata.table_name.as_str()).size(12),
+            text("."),
+            text(column_metadata.name.as_str()).size(12)
+        ]
+        .align_y(Alignment::Center),
+    )
+    .padding(0)
+    .style(button::text)
+    .on_press(SchemaExplorerMessage::SelectDetails(Metadata::Column(
+        column_metadata.clone(),
+    )))
     .into()
 }
 
 fn view_table_metadata(table_metadata: &TableMetadata) -> Element<'_, SchemaExplorerMessage> {
-    button(row![
-        text(table_metadata.schema.as_str()),
-        text("."),
-        text(table_metadata.name.as_str())
-    ])
+    button(
+        row![
+            text(table_metadata.schema.as_str()).size(12),
+            text(".").size(12),
+            text(table_metadata.name.as_str()).size(12)
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(SchemaExplorerMessage::SelectDetails(Metadata::Table(
+        table_metadata.clone(),
+    )))
+    .padding(0)
+    .style(button::text)
     .into()
 }
 
 fn view_schema_metadata(schema_metadata: &SchemaMetadata) -> Element<'_, SchemaExplorerMessage> {
-    text(schema_metadata.name.as_str()).into()
-}
-
-fn entry_row(entry: &SchemaEntry) -> Element<'_, SchemaExplorerMessage> {
-    container(
-        row![
-            text(entry.full_name.as_str()).size(13).width(Length::Fill),
-            text(entry.detail.as_str()).size(11).style(text::secondary),
-        ]
-        .align_y(Alignment::Center),
-    )
-    .padding([4, 0])
-    .into()
-}
-
-fn flatten(schema: &Schema) -> Vec<SchemaEntry> {
-    let mut entries = Vec::new();
-    for s in &schema.schemas {
-        entries.push(SchemaEntry {
-            full_name: s.name.clone(),
-            detail: format!("{} tables", s.tables.len()),
-        });
-        for t in &s.tables {
-            entries.push(SchemaEntry {
-                full_name: format!("{}.{}", s.name, t.name),
-                detail: format!("{} columns", t.columns.len()),
-            });
-            for c in &t.columns {
-                entries.push(SchemaEntry {
-                    full_name: format!("{}.{}.{}", s.name, t.name, c.name),
-                    detail: c.data_type.clone(),
-                });
-            }
-        }
-    }
-    entries
+    text(schema_metadata.name.as_str()).size(12).into()
 }
 
 fn filter_connections(names: &[String], query: &str) -> Vec<String> {
