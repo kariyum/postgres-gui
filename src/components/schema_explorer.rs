@@ -400,9 +400,15 @@ impl SchemaExplorer {
         };
 
         let search_input = container(
-            RawTextInput::new("Search tables and columns...")
-                .value(search.as_str())
-                .on_input(SchemaExplorerMessage::SearchChanged),
+            text_input("Search tables and columns...", search.as_str())
+                .on_input(SchemaExplorerMessage::SearchChanged)
+                .style(|theme, status| text_input::Style {
+                    border: iced::Border::default().color(Color::TRANSPARENT),
+                    background: iced::Background::Color(Color::TRANSPARENT).into(),
+                    ..text_input::default(theme, status)
+                })
+                .size(12)
+                .padding([4, 4]),
         )
         .width(Length::Fill)
         .padding([0, 4]);
