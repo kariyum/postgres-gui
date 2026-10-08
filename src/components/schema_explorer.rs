@@ -1,4 +1,5 @@
 use iced::futures::channel::mpsc::Sender;
+use iced::widget::space::horizontal;
 use iced::widget::{
     Column, Row, button, column, container, row, rule, scrollable, space, text, text_input,
 };
@@ -447,16 +448,47 @@ impl SchemaExplorer {
 fn view_column_metadata(column_metadata: &ColumnMetadata) -> Element<'_, SchemaExplorerMessage> {
     button(
         row![
-            text(column_metadata.schema_name.as_str()).size(12),
-            text(".").size(12),
-            text(column_metadata.table_name.as_str()).size(12),
-            text("."),
+            container(text("col").size(10))
+                .style(|_| container::Style {
+                    background: Some(Color::from_rgb8(64, 105, 153).into()),
+                    border: iced::Border {
+                        radius: 5.0.into(),
+                        width: 0.0,
+                        color: iced::Color::TRANSPARENT,
+                    },
+                    ..Default::default()
+                })
+                .padding([0, 4]),
+            space::horizontal().width(4),
+            text(format!(
+                "{}.{}",
+                column_metadata.schema_name.as_str(),
+                column_metadata.table_name.as_str()
+            ))
+            .style(|theme| text::secondary(theme))
+            .size(12),
+            space::horizontal().width(4),
             text(column_metadata.name.as_str()).size(12)
         ]
-        .align_y(Alignment::Center),
+        .align_y(Alignment::Center)
+        .wrap(),
     )
-    .padding(0)
-    .style(button::text)
+    .padding([2, 4])
+    .style(|theme, status| {
+        let background_color = match status {
+            button::Status::Active => Color::TRANSPARENT,
+            _ => theme.palette().background.weak.color,
+        };
+        button::Style {
+            background: Some(background_color.into()),
+            border: iced::Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: border::radius(5.0),
+            },
+            ..button::text(theme, status)
+        }
+    })
     .on_press(SchemaExplorerMessage::SelectDetails(Metadata::Column(
         column_metadata.clone(),
     )))
@@ -466,22 +498,68 @@ fn view_column_metadata(column_metadata: &ColumnMetadata) -> Element<'_, SchemaE
 fn view_table_metadata(table_metadata: &TableMetadata) -> Element<'_, SchemaExplorerMessage> {
     button(
         row![
-            text(table_metadata.schema.as_str()).size(12),
-            text(".").size(12),
+            container(text("table").size(10))
+                .style(|_| container::Style {
+                    background: Some(Color::from_rgb8(110, 64, 153).into()),
+                    border: iced::Border {
+                        radius: 5.0.into(),
+                        width: 0.0,
+                        color: iced::Color::TRANSPARENT,
+                    },
+                    ..Default::default()
+                })
+                .padding([0, 4]),
+            space::horizontal().width(4),
+            text(table_metadata.schema.as_str())
+                .style(text::secondary)
+                .size(12),
+            space::horizontal().width(4),
             text(table_metadata.name.as_str()).size(12)
         ]
-        .align_y(Alignment::Center),
+        .align_y(Alignment::Center)
+        .wrap(),
     )
     .on_press(SchemaExplorerMessage::SelectDetails(Metadata::Table(
         table_metadata.clone(),
     )))
-    .padding(0)
-    .style(button::text)
+    .padding([2, 4])
+    .style(|theme, status| {
+        let background_color = match status {
+            button::Status::Active => Color::TRANSPARENT,
+            _ => theme.palette().background.weak.color,
+        };
+        button::Style {
+            background: Some(background_color.into()),
+            border: iced::Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: border::radius(5.0),
+            },
+            ..button::text(theme, status)
+        }
+    })
     .into()
 }
 
 fn view_schema_metadata(schema_metadata: &SchemaMetadata) -> Element<'_, SchemaExplorerMessage> {
-    text(schema_metadata.name.as_str()).size(12).into()
+    row![
+        container(text("schema").size(10))
+            .style(|_| container::Style {
+                background: Some(Color::from_rgb8(153, 64, 64).into()),
+                border: iced::Border {
+                    radius: 5.0.into(),
+                    width: 0.0,
+                    color: iced::Color::TRANSPARENT,
+                },
+                ..Default::default()
+            })
+            .padding([0, 4]),
+        space::horizontal().width(4),
+        text(schema_metadata.name.as_str()).size(12)
+    ]
+    .align_y(Alignment::Center)
+    .padding([2, 4])
+    .into()
 }
 
 fn filter_connections(names: &[String], query: &str) -> Vec<String> {
