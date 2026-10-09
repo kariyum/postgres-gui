@@ -100,6 +100,8 @@ struct Browse {
     filtered_metadata: DatabaseMetadata,
     search: String,
     loading: bool,
+    schema_filter: Option<SchemaFilter>,
+    selected_metadata: Option<Metadata>,
     error: Option<String>,
 }
 
@@ -216,8 +218,21 @@ impl SchemaExplorer {
                 self.close();
                 Task::none()
             }
-            SchemaExplorerMessage::SchemaFilter(filter) => Task::none(),
-            SchemaExplorerMessage::SelectDetails(metadata) => todo!(),
+            SchemaExplorerMessage::SchemaFilter(filter) => {
+                if let Stage::Browse(Browse { schema_filter, .. }) = &mut self.stage {
+                    *schema_filter = Some(filter);
+                };
+                Task::none()
+            }
+            SchemaExplorerMessage::SelectDetails(metadata) => {
+                if let Stage::Browse(Browse {
+                    selected_metadata, ..
+                }) = &mut self.stage
+                {
+                    *selected_metadata = Some(metadata);
+                };
+                Task::none()
+            }
         }
     }
 
@@ -231,6 +246,8 @@ impl SchemaExplorer {
                 schema: Schema::new(name.clone()),
                 filtered_metadata: DatabaseMetadata::new(name.clone()),
                 metadata: DatabaseMetadata::new(name),
+                selected_metadata: None,
+                schema_filter: None,
             });
             return Task::none();
         };
@@ -243,6 +260,8 @@ impl SchemaExplorer {
             error: None,
             filtered_metadata: DatabaseMetadata::new(name.clone()),
             metadata: DatabaseMetadata::new(name.clone()),
+            selected_metadata: None,
+            schema_filter: None,
         });
 
         let connection = name.clone();
@@ -358,18 +377,30 @@ impl SchemaExplorer {
     fn view_schema_list<'a>(
         &'a self,
         database_metadata: &'a DatabaseMetadata,
+        schema_filter: &'a Option<SchemaFilter>,
     ) -> Element<'a, SchemaExplorerMessage> {
-        Column::from_iter(
-            database_metadata
-                .schemas
-                .iter()
-                .map(|metadata| match metadata {
+        Column::from_iter(database_metadata.schemas.iter().map(|metadata| {
+            schema_filter
+                .as_ref()
+                .map(|filter| match filter {
+                    SchemaFilter::Schemas if let Metadata::Schema(schema) = metadata => {
+                        view_schema_metadata(schema)
+                    }
+                    SchemaFilter::Tables if let Metadata::Table(metadata) = metadata => {
+                        view_table_metadata(metadata)
+                    }
+                    SchemaFilter::Columns if let Metadata::Column(metadata) = metadata => {
+                        view_column_metadata(metadata)
+                    }
+                    _ => space().height(0).width(0).into(),
+                })
+                .unwrap_or(match metadata {
                     Metadata::Schema(schema_metadata) => view_schema_metadata(schema_metadata),
                     Metadata::Table(table_metadata) => view_table_metadata(table_metadata),
                     Metadata::Column(column_metadata) => view_column_metadata(column_metadata),
-                }),
-        )
-        .spacing(4)
+                })
+        }))
+        .spacing(0)
         .into()
     }
 
@@ -382,6 +413,8 @@ impl SchemaExplorer {
             search,
             loading,
             error,
+            selected_metadata,
+            schema_filter,
         } = browse;
         let list: Element<'_, SchemaExplorerMessage> = if *loading {
             text("Loading schema...")
@@ -396,7 +429,8 @@ impl SchemaExplorer {
         } else if filtered_metadata.schemas.is_empty() {
             text("No results.").size(13).style(text::secondary).into()
         } else {
-            self.view_schema_list(filtered_metadata).into()
+            self.view_schema_list(filtered_metadata, schema_filter)
+                .into()
         };
 
         let search_input = container(
@@ -408,7 +442,7 @@ impl SchemaExplorer {
                     ..text_input::default(theme, status)
                 })
                 .size(12)
-                .padding([4, 4]),
+                .padding([8, 4]),
         )
         .width(Length::Fill)
         .padding([0, 4]);
@@ -416,7 +450,7 @@ impl SchemaExplorer {
         let form = column![
             column![search_input, rule::horizontal(1), self.view_quick_filter(),],
             row![
-                scrollable(container(list).padding([4, 8]))
+                scrollable(container(list).padding([4, 4]))
                     .direction(scrollable::Direction::Vertical(
                         scrollable::Scrollbar::new().width(4).scroller_width(4),
                     ))
