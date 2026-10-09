@@ -1,14 +1,16 @@
 use iced::futures::channel::mpsc::Sender;
 use iced::widget::space::horizontal;
 use iced::widget::{
-    Column, Row, button, column, container, row, rule, scrollable, space, text, text_input,
+    Column, Id, Row, button, column, container, operation, row, rule, scrollable, space, text,
+    text_input,
 };
 use iced::{Alignment, Color, Element, Length, Task, Theme, border};
 
 use crate::core::database_keeper::{self, DatabaseKeeperMessage};
 use crate::types::Schema;
 use crate::widgets::palette::{Palette, PaletteMessage};
-use crate::widgets::raw_text_input::{self, RawTextInput};
+
+const CONNECTION_INPUT_ID: &str = "connection_picker_input";
 
 #[derive(Debug, Clone)]
 pub struct DatabaseMetadata {
@@ -154,7 +156,7 @@ impl SchemaExplorer {
         &mut self,
         names: Vec<String>,
         database_keeper: Option<Sender<DatabaseKeeperMessage>>,
-    ) {
+    ) -> Task<SchemaExplorerMessage> {
         self.visible = true;
         self.database_keeper = database_keeper;
         self.stage = Stage::SelectConnection {
@@ -162,6 +164,8 @@ impl SchemaExplorer {
             filtered: names.clone(),
             names,
         };
+
+        operation::focus(Id::new(CONNECTION_INPUT_ID))
     }
 
     pub fn close(&mut self) {
@@ -329,8 +333,9 @@ impl SchemaExplorer {
                 query, filtered, ..
             } => {
                 let labels: Vec<&str> = filtered.iter().map(|s| s.as_str()).collect();
-                let palette: Element<'_, PaletteMessage> =
-                    Palette::new(query.as_str(), labels).into();
+                let palette: Element<'_, PaletteMessage> = Palette::new(query.as_str(), labels)
+                    .input_id(Id::new(CONNECTION_INPUT_ID))
+                    .into();
                 Some(palette.map(SchemaExplorerMessage::ConnectionPalette))
             }
             Stage::Browse(browse) => Some(self.view_browse(browse)),

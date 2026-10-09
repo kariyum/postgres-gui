@@ -525,8 +525,9 @@ impl App {
             .map(|cfg| cfg.name.clone())
             .collect();
         let tx = self.database_keeper_actor_tx.clone();
-        self.schema_explorer.open(names, tx);
-        Task::none()
+        self.schema_explorer
+            .open(names, tx)
+            .map(Message::SchemaExplorer)
     }
 
     fn save_config(&self) -> Task<Message> {

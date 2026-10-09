@@ -1,6 +1,9 @@
+use iced::widget::{Id, operation};
 use iced::{Element, Task};
 
 use crate::widgets::palette::{Palette, PaletteMessage};
+
+const INPUT_ID: &str = "command_palette_input";
 
 #[derive(Debug, Clone)]
 pub struct CommandPalette {
@@ -77,8 +80,9 @@ impl CommandPalette {
                 .map(|command| command.label.as_str())
                 .collect();
 
-            let palette: Element<'_, PaletteMessage> =
-                Palette::new(&self.search_query, labels).into();
+            let palette: Element<'_, PaletteMessage> = Palette::new(&self.search_query, labels)
+                .input_id(Id::new(INPUT_ID))
+                .into();
 
             palette.map(Message::Palette)
         })
@@ -90,7 +94,11 @@ impl CommandPalette {
                 self.is_visible = !self.is_visible;
                 self.search_query.clear();
                 self.refresh_filtered_commands();
-                Task::none()
+                if self.is_visible {
+                    operation::focus(Id::new(INPUT_ID))
+                } else {
+                    Task::none()
+                }
             }
             Message::Hide => {
                 self.is_visible = false;

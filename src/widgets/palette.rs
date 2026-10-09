@@ -2,12 +2,12 @@ use iced::advanced::layout::{self, Layout, Limits};
 use iced::advanced::renderer::Renderer as _;
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Shell, mouse, overlay, renderer};
-use iced::widget::{Column, button, container, rule, text};
+use iced::widget::{Column, Id, button, container, rule, text, text_input};
 use iced::{
-    Background, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Vector, keyboard,
+    Background, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Vector,
+    keyboard,
 };
 
-use crate::widgets::raw_text_input::RawTextInput;
 use crate::widgets::scrollable::{Scrollable, State as ScrollableState};
 
 const PALETTE_WIDTH: f32 = 500.0;
@@ -83,14 +83,7 @@ impl<'a> Palette<'a> {
             .width(Length::Fill);
 
         let children = vec![
-            container(
-                RawTextInput::new("Search")
-                    .value(query)
-                    .on_input(PaletteMessage::InputChanged),
-            )
-            .width(Length::Fill)
-            .padding([0, 4])
-            .into(),
+            Self::build_input(query, Id::new("palette_input")),
             rule::horizontal(1.0).into(),
             Scrollable::new(column).line_height(ROW_STRIDE).into(),
         ];
@@ -102,6 +95,29 @@ impl<'a> Palette<'a> {
             width: Length::Fixed(PALETTE_WIDTH),
             height: Length::Fixed(PALETTE_HEIGHT),
         }
+    }
+
+    fn build_input(value: &str, id: Id) -> Element<'a, PaletteMessage> {
+        container(
+            text_input("Search", value)
+                .id(id)
+                .on_input(PaletteMessage::InputChanged)
+                .style(|theme, status| text_input::Style {
+                    border: iced::Border::default().color(Color::TRANSPARENT),
+                    background: iced::Background::Color(Color::TRANSPARENT).into(),
+                    ..text_input::default(theme, status)
+                })
+                .size(12)
+                .padding([8, 4]),
+        )
+        .width(Length::Fill)
+        .padding([0, 4])
+        .into()
+    }
+
+    pub fn input_id(mut self, id: Id) -> Self {
+        self.children[0] = Self::build_input(&self.input_value, id);
+        self
     }
 
     fn content_height(&self) -> f32 {
