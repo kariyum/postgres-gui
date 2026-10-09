@@ -130,7 +130,7 @@ pub enum SchemaExplorerMessage {
     SelectDetails(Metadata),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaFilter {
     Schemas,
     Tables,
@@ -224,7 +224,11 @@ impl SchemaExplorer {
             }
             SchemaExplorerMessage::SchemaFilter(filter) => {
                 if let Stage::Browse(Browse { schema_filter, .. }) = &mut self.stage {
-                    *schema_filter = Some(filter);
+                    if schema_filter.as_ref() == Some(&filter) {
+                        *schema_filter = None;
+                    } else {
+                        *schema_filter = Some(filter);
+                    }
                 };
                 Task::none()
             }
@@ -342,7 +346,7 @@ impl SchemaExplorer {
         }
     }
 
-    fn view_quick_filter(&self) -> Element<'_, SchemaExplorerMessage> {
+    fn view_quick_filter<'a>(&'a self, browse: &'a Browse) -> Element<'a, SchemaExplorerMessage> {
         let filters: Vec<Element<'_, SchemaExplorerMessage>> = vec![
             button(text("Schemas").size(12))
                 .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Schemas)),
@@ -357,7 +361,19 @@ impl SchemaExplorer {
                 .style(|theme, status| {
                     let base = button::primary(theme, status);
                     button::Style {
-                        border: border::Border::default().rounded(999.0),
+                        border: border::Border::default().rounded(5.0),
+                        background: {
+                            if matches!(status, button::Status::Active)
+                                && browse
+                                    .schema_filter
+                                    .as_ref()
+                                    .is_some_and(|filter| matches!(filter, SchemaFilter::Columns))
+                            {
+                                Some(theme.palette().primary.weak.color.into())
+                            } else {
+                                base.background
+                            }
+                        },
                         ..base
                     }
                 })
@@ -453,7 +469,11 @@ impl SchemaExplorer {
         .padding([0, 4]);
 
         let form = column![
-            column![search_input, rule::horizontal(1), self.view_quick_filter(),],
+            column![
+                search_input,
+                rule::horizontal(1),
+                self.view_quick_filter(browse),
+            ],
             row![
                 scrollable(container(list).padding([4, 4]))
                     .direction(scrollable::Direction::Vertical(
