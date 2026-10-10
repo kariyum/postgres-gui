@@ -876,24 +876,26 @@ impl App {
     }
 
     pub fn key_press_handler(&self) -> Subscription<Message> {
-        iced::keyboard::listen().filter_map(|event| match event {
-            iced::keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                match (modifiers, key.as_ref()) {
-                    (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("=")) => {
-                        Some(Message::ZoomIn)
-                    }
-                    (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("-")) => {
-                        Some(Message::ZoomOut)
-                    }
-                    (modifiers, iced::keyboard::Key::Character("p" | "P"))
-                        if modifiers.control() && modifiers.shift() =>
-                    {
-                        Some(Message::CommandPalette(command_palette::Message::Toggle))
-                    }
-                    (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
-                    _ => None,
+        iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                ..
+            }) => match (modifiers, key.as_ref()) {
+                (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("=")) => {
+                    Some(Message::ZoomIn)
                 }
-            }
+                (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("-")) => {
+                    Some(Message::ZoomOut)
+                }
+                (modifiers, iced::keyboard::Key::Character("p" | "P"))
+                    if modifiers.control() && modifiers.shift() =>
+                {
+                    Some(Message::CommandPalette(command_palette::Message::Toggle))
+                }
+                (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
+                _ => None,
+            },
             _ => None,
         })
     }

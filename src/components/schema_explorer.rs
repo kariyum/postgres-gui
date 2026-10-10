@@ -11,6 +11,7 @@ use crate::types::Schema;
 use crate::widgets::palette::{Palette, PaletteMessage};
 
 const CONNECTION_INPUT_ID: &str = "connection_picker_input";
+const SEARCH_QUERY_INPUT_ID: &str = "search_query_picker_input";
 
 #[derive(Debug, Clone)]
 pub struct DatabaseMetadata {
@@ -41,18 +42,29 @@ impl From<Schema> for DatabaseMetadata {
             }));
 
             for table in schema_info.tables {
-                schemas.push(Metadata::Table(TableMetadata {
-                    schema: schema_info.name.clone(),
-                    name: table.name.clone(),
-                }));
-
-                for column in table.columns {
+                for column in table.columns.iter() {
                     schemas.push(Metadata::Column(ColumnMetadata {
                         schema_name: schema_info.name.clone(),
                         table_name: table.name.clone(),
                         name: column.name.clone(),
                     }));
                 }
+
+                let columns = table
+                    .columns
+                    .iter()
+                    .map(|column| ColumnMetadata {
+                        schema_name: schema_info.name.clone(),
+                        table_name: table.name.clone(),
+                        name: column.name.clone(),
+                    })
+                    .collect();
+
+                schemas.push(Metadata::Table(TableMetadata {
+                    schema: schema_info.name.clone(),
+                    name: table.name.clone(),
+                    columns,
+                }));
             }
         }
 
@@ -67,6 +79,7 @@ impl From<Schema> for DatabaseMetadata {
 pub struct TableMetadata {
     schema: String,
     name: String,
+    columns: Vec<ColumnMetadata>,
 }
 
 #[derive(Debug, Clone)]
@@ -273,14 +286,17 @@ impl SchemaExplorer {
         });
 
         let connection = name.clone();
-        Task::perform(
-            async move {
-                database_keeper::get_schema(&mut actor, &name)
-                    .await
-                    .map_err(|e| e.to_string())
-            },
-            move |result| SchemaExplorerMessage::SchemaLoaded { connection, result },
-        )
+        Task::batch(vec![
+            Task::perform(
+                async move {
+                    database_keeper::get_schema(&mut actor, &name)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                move |result| SchemaExplorerMessage::SchemaLoaded { connection, result },
+            ),
+            operation::focus(Id::new(SEARCH_QUERY_INPUT_ID)),
+        ])
     }
 
     fn handle_schema_loaded(&mut self, connection: String, result: Result<Schema, String>) {
@@ -348,30 +364,47 @@ impl SchemaExplorer {
 
     fn view_quick_filter<'a>(&'a self, browse: &'a Browse) -> Element<'a, SchemaExplorerMessage> {
         let filters: Vec<Element<'_, SchemaExplorerMessage>> = vec![
-            button(text("Schemas").size(12))
-                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Schemas)),
-            button(text("Tables").size(12))
-                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Tables)),
-            button(text("Columns").size(12))
-                .on_press(SchemaExplorerMessage::SchemaFilter(SchemaFilter::Columns)),
+            SchemaFilter::Schemas,
+            SchemaFilter::Tables,
+            SchemaFilter::Columns,
         ]
         .into_iter()
-        .map(|btn| {
-            btn.padding([0, 8])
-                .style(|theme, status| {
+        .map(|schema_filter| {
+            let title = match schema_filter {
+                SchemaFilter::Schemas => "Schemas",
+                SchemaFilter::Tables => "Tables",
+                SchemaFilter::Columns => "Columns",
+            };
+
+            button(text(title).size(12))
+                .on_press(SchemaExplorerMessage::SchemaFilter(schema_filter.clone()))
+                .padding([0, 8])
+                .style(move |theme, status| {
                     let base = button::primary(theme, status);
                     button::Style {
                         border: border::Border::default().rounded(5.0),
-                        background: {
-                            if matches!(status, button::Status::Active)
+                        text_color: {
+                            if matches!(status, button::Status::Active | button::Status::Hovered)
                                 && browse
                                     .schema_filter
                                     .as_ref()
-                                    .is_some_and(|filter| matches!(filter, SchemaFilter::Columns))
+                                    .is_some_and(|filter| *filter == schema_filter.clone())
                             {
-                                Some(theme.palette().primary.weak.color.into())
+                                base.text_color
                             } else {
+                                button::subtle(theme, status).text_color
+                            }
+                        },
+                        background: {
+                            if matches!(status, button::Status::Active | button::Status::Hovered)
+                                && browse
+                                    .schema_filter
+                                    .as_ref()
+                                    .is_some_and(|filter| *filter == schema_filter.clone())
+                            {
                                 base.background
+                            } else {
+                                button::subtle(theme, status).background
                             }
                         },
                         ..base
@@ -391,8 +424,15 @@ impl SchemaExplorer {
         .into()
     }
 
-    fn view_details(&self) -> Element<'_, SchemaExplorerMessage> {
-        container(text("ok")).into()
+    fn view_details<'a>(
+        &'a self,
+        metadata: &'a Option<Metadata>,
+    ) -> Element<'a, SchemaExplorerMessage> {
+        let element: Element<'a, SchemaExplorerMessage> = match metadata.as_ref() {
+            Some(metadata) => view_metadata_details(metadata).into(),
+            None => space().into(),
+        };
+        container(element).into()
     }
 
     fn view_schema_list<'a>(
@@ -413,7 +453,7 @@ impl SchemaExplorer {
                     SchemaFilter::Columns if let Metadata::Column(metadata) = metadata => {
                         view_column_metadata(metadata)
                     }
-                    _ => space().height(0).width(0).into(),
+                    _ => space().into(),
                 })
                 .unwrap_or(match metadata {
                     Metadata::Schema(schema_metadata) => view_schema_metadata(schema_metadata),
@@ -462,6 +502,7 @@ impl SchemaExplorer {
                     background: iced::Background::Color(Color::TRANSPARENT).into(),
                     ..text_input::default(theme, status)
                 })
+                .id(SEARCH_QUERY_INPUT_ID)
                 .size(12)
                 .padding([8, 4]),
         )
@@ -482,7 +523,7 @@ impl SchemaExplorer {
                     .height(Length::Fill)
                     .width(Length::FillPortion(1)),
                 rule::vertical(1),
-                container(self.view_details())
+                container(self.view_details(selected_metadata))
                     .padding([0, 8])
                     .height(Length::Fill)
                     .width(Length::FillPortion(1)),
@@ -507,6 +548,27 @@ impl SchemaExplorer {
                 }
             })
             .into()
+    }
+}
+
+fn view_metadata_details<'a>(metadata: &'a Metadata) -> Element<'a, SchemaExplorerMessage> {
+    match metadata {
+        Metadata::Schema(schema_metadata) => text("schema").into(),
+        Metadata::Table(table_metadata) => {
+            let columns = Column::from_iter(
+                table_metadata
+                    .columns
+                    .iter()
+                    .map(|column_metadata| text(column_metadata.name.as_str()).into()),
+            );
+            container(column![
+                text(table_metadata.schema.as_str()),
+                text(table_metadata.name.as_str()),
+                columns
+            ])
+            .into()
+        }
+        Metadata::Column(column_metadata) => container(text(column_metadata.name.as_str())).into(),
     }
 }
 
