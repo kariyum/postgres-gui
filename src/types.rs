@@ -53,13 +53,25 @@ pub struct TreeNode {
     pub schema: Option<String>,
 }
 
+/// A foreign key reference: which schema.table.column a column points to.
+#[derive(Debug, Clone)]
+pub struct ForeignKeyRef {
+    pub schema: String,
+    pub table: String,
+    pub column: String,
+}
+
 /// A column in a table's schema definition.
 #[derive(Debug, Clone)]
 pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
-    #[allow(dead_code)]
     pub nullable: bool,
+    pub column_default: Option<String>,
+    pub character_maximum_length: Option<i32>,
+    pub is_primary_key: bool,
+    pub is_foreign_key: bool,
+    pub references: Option<ForeignKeyRef>,
 }
 
 /// A table and its columns within a database schema.

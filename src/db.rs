@@ -1,7 +1,11 @@
-use sqlx::{Column, PgPool, Row, TypeInfo};
-use sqlx::postgres::PgPoolOptions;
+use std::collections::{HashMap, HashSet};
 
-use crate::types::{ColumnInfo, QueryResult, ResultColumn, ResultRow, SchemaInfo, TableInfo, TreeNode};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Column, PgPool, Row, TypeInfo};
+
+use crate::types::{
+    ColumnInfo, ForeignKeyRef, QueryResult, ResultColumn, ResultRow, SchemaInfo, TableInfo,
+};
 
 /// Connect to a PostgreSQL database and return a pool.
 pub async fn connect(connection_string: &str) -> Result<PgPool, String> {
@@ -140,7 +144,8 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> S
 /// Fetch the full schema (schemas, tables, and columns) for the schema explorer.
 pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
     let rows = sqlx::query(
-        "SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable \
+        "SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable, \
+                c.column_default, c.character_maximum_length \
          FROM information_schema.columns c \
          JOIN information_schema.tables t \
            ON t.table_schema = c.table_schema AND t.table_name = c.table_name \
@@ -152,6 +157,70 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
     .await
     .map_err(|e| e.to_string())?;
 
+    // Primary key columns: (schema, table) -> set of column names.
+    let pk_rows = sqlx::query(
+        "SELECT tc.table_schema, tc.table_name, kcu.column_name \
+         FROM information_schema.table_constraints tc \
+         JOIN information_schema.key_column_usage kcu \
+           ON tc.constraint_name = kcu.constraint_name \
+          AND tc.constraint_schema = kcu.constraint_schema \
+          AND tc.table_schema = kcu.table_schema \
+          AND tc.table_name = kcu.table_name \
+         WHERE tc.constraint_type = 'PRIMARY KEY' \
+           AND tc.table_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut primary_keys: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    for row in &pk_rows {
+        let schema_name: String = row.try_get("table_schema").map_err(|e| e.to_string())?;
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let column_name: String = row.try_get("column_name").map_err(|e| e.to_string())?;
+        primary_keys
+            .entry((schema_name, table_name))
+            .or_default()
+            .insert(column_name);
+    }
+
+    // Foreign key columns: (schema, table, column) -> referenced (schema, table, column).
+    let fk_rows = sqlx::query(
+        "SELECT kcu.table_schema, kcu.table_name, kcu.column_name, \
+                ccu.table_schema AS foreign_schema, ccu.table_name AS foreign_table, \
+                ccu.column_name AS foreign_column \
+         FROM information_schema.key_column_usage kcu \
+         JOIN information_schema.referential_constraints rc \
+           ON rc.constraint_schema = kcu.constraint_schema \
+          AND rc.constraint_name = kcu.constraint_name \
+         JOIN information_schema.key_column_usage ccu \
+           ON ccu.constraint_schema = rc.unique_constraint_schema \
+          AND ccu.constraint_name = rc.unique_constraint_name \
+          AND ccu.ordinal_position = kcu.position_in_unique_constraint \
+         WHERE kcu.table_schema NOT IN ('information_schema', 'pg_catalog', 'pg_toast')",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut foreign_keys: HashMap<(String, String, String), ForeignKeyRef> = HashMap::new();
+    for row in &fk_rows {
+        let schema_name: String = row.try_get("table_schema").map_err(|e| e.to_string())?;
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let column_name: String = row.try_get("column_name").map_err(|e| e.to_string())?;
+        let foreign_schema: String = row.try_get("foreign_schema").map_err(|e| e.to_string())?;
+        let foreign_table: String = row.try_get("foreign_table").map_err(|e| e.to_string())?;
+        let foreign_column: String = row.try_get("foreign_column").map_err(|e| e.to_string())?;
+        foreign_keys.insert(
+            (schema_name, table_name, column_name),
+            ForeignKeyRef {
+                schema: foreign_schema,
+                table: foreign_table,
+                column: foreign_column,
+            },
+        );
+    }
+
     let mut schemas: Vec<SchemaInfo> = Vec::new();
     for row in &rows {
         let schema_name: String = row.try_get("table_schema").map_err(|e| e.to_string())?;
@@ -159,6 +228,18 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
         let column_name: String = row.try_get("column_name").map_err(|e| e.to_string())?;
         let data_type: String = row.try_get("data_type").map_err(|e| e.to_string())?;
         let nullable: String = row.try_get("is_nullable").map_err(|e| e.to_string())?;
+        let column_default: Option<String> =
+            row.try_get("column_default").map_err(|e| e.to_string())?;
+        let character_maximum_length: Option<i32> = row
+            .try_get("character_maximum_length")
+            .map_err(|e| e.to_string())?;
+
+        let is_primary_key = primary_keys
+            .get(&(schema_name.clone(), table_name.clone()))
+            .is_some_and(|cols| cols.contains(&column_name));
+        let references = foreign_keys
+            .get(&(schema_name.clone(), table_name.clone(), column_name.clone()))
+            .cloned();
 
         let schema = match schemas.iter_mut().find(|s| s.name == schema_name) {
             Some(schema) => schema,
@@ -186,6 +267,11 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
             name: column_name,
             data_type,
             nullable: nullable == "YES",
+            column_default,
+            character_maximum_length,
+            is_primary_key,
+            is_foreign_key: references.is_some(),
+            references,
         });
     }
 

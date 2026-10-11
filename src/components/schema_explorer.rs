@@ -1,13 +1,12 @@
 use iced::futures::channel::mpsc::Sender;
-use iced::widget::space::horizontal;
 use iced::widget::{
-    Column, Id, Row, button, column, container, operation, row, rule, scrollable, space, text,
+    Column, Id, button, column, container, operation, row, rule, scrollable, space, text,
     text_input,
 };
 use iced::{Alignment, Color, Element, Length, Task, Theme, border};
 
 use crate::core::database_keeper::{self, DatabaseKeeperMessage};
-use crate::types::Schema;
+use crate::types::{ForeignKeyRef, Schema};
 use crate::widgets::palette::{Palette, PaletteMessage};
 
 const CONNECTION_INPUT_ID: &str = "connection_picker_input";
@@ -42,21 +41,39 @@ impl From<Schema> for DatabaseMetadata {
             }));
 
             for table in schema_info.tables {
-                for column in table.columns.iter() {
-                    schemas.push(Metadata::Column(ColumnMetadata {
-                        schema_name: schema_info.name.clone(),
-                        table_name: table.name.clone(),
-                        name: column.name.clone(),
-                    }));
-                }
-
-                let columns = table
+                let columns: Vec<ColumnMetadata> = table
                     .columns
                     .iter()
                     .map(|column| ColumnMetadata {
                         schema_name: schema_info.name.clone(),
                         table_name: table.name.clone(),
                         name: column.name.clone(),
+                        data_type: column.data_type.clone(),
+                        nullable: column.nullable,
+                        column_default: column.column_default.clone(),
+                        character_maximum_length: column.character_maximum_length,
+                        is_primary_key: column.is_primary_key,
+                        is_foreign_key: column.is_foreign_key,
+                        references: column.references.clone(),
+                    })
+                    .collect();
+
+                for column in &columns {
+                    schemas.push(Metadata::Column(column.clone()));
+                }
+
+                let primary_key: Vec<String> = columns
+                    .iter()
+                    .filter(|column| column.is_primary_key)
+                    .map(|column| column.name.clone())
+                    .collect();
+                let foreign_keys: Vec<TableForeignKey> = columns
+                    .iter()
+                    .filter_map(|column| {
+                        column.references.as_ref().map(|reference| TableForeignKey {
+                            column: column.name.clone(),
+                            references: reference.clone(),
+                        })
                     })
                     .collect();
 
@@ -64,6 +81,8 @@ impl From<Schema> for DatabaseMetadata {
                     schema: schema_info.name.clone(),
                     name: table.name.clone(),
                     columns,
+                    primary_key,
+                    foreign_keys,
                 }));
             }
         }
@@ -80,6 +99,14 @@ pub struct TableMetadata {
     schema: String,
     name: String,
     columns: Vec<ColumnMetadata>,
+    primary_key: Vec<String>,
+    foreign_keys: Vec<TableForeignKey>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableForeignKey {
+    column: String,
+    references: ForeignKeyRef,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +126,13 @@ pub struct ColumnMetadata {
     schema_name: String,
     table_name: String,
     name: String,
+    data_type: String,
+    nullable: bool,
+    column_default: Option<String>,
+    character_maximum_length: Option<i32>,
+    is_primary_key: bool,
+    is_foreign_key: bool,
+    references: Option<ForeignKeyRef>,
 }
 #[derive(Debug, Clone)]
 pub struct SchemaExplorer {
@@ -553,23 +587,176 @@ impl SchemaExplorer {
 
 fn view_metadata_details<'a>(metadata: &'a Metadata) -> Element<'a, SchemaExplorerMessage> {
     match metadata {
-        Metadata::Schema(schema_metadata) => text("schema").into(),
-        Metadata::Table(table_metadata) => {
-            let columns = Column::from_iter(
-                table_metadata
-                    .columns
-                    .iter()
-                    .map(|column_metadata| text(column_metadata.name.as_str()).into()),
-            );
-            container(column![
-                text(table_metadata.schema.as_str()),
-                text(table_metadata.name.as_str()),
-                columns
-            ])
-            .into()
-        }
-        Metadata::Column(column_metadata) => container(text(column_metadata.name.as_str())).into(),
+        Metadata::Schema(schema_metadata) => text(schema_metadata.name.as_str()).into(),
+        Metadata::Table(table_metadata) => view_table_details(table_metadata).into(),
+        Metadata::Column(column_metadata) => view_column_details(column_metadata).into(),
     }
+}
+
+fn view_column_details<'a>(
+    column_metadata: &'a ColumnMetadata,
+) -> Element<'a, SchemaExplorerMessage> {
+    let default_text = column_metadata
+        .column_default
+        .as_deref()
+        .unwrap_or("(none)");
+
+    let mut rows: Vec<Element<'_, SchemaExplorerMessage>> = vec![
+        detail_row("Type", column_metadata.data_type.as_str()),
+        detail_row(
+            "Nullable",
+            if column_metadata.nullable {
+                "Yes"
+            } else {
+                "No"
+            },
+        ),
+        detail_row(
+            "Primary key",
+            if column_metadata.is_primary_key {
+                "Yes"
+            } else {
+                "No"
+            },
+        ),
+        detail_row("Default", default_text),
+    ];
+
+    if let Some(reference) = &column_metadata.references {
+        rows.push(detail_row(
+            "Foreign key",
+            format!(
+                "{}.{}.{}",
+                reference.schema, reference.table, reference.column
+            ),
+        ));
+    }
+
+    if let Some(length) = column_metadata.character_maximum_length {
+        rows.push(detail_row("Max length", length.to_string()));
+    }
+
+    container(
+        column![
+            text(column_metadata.name.as_str()).size(16),
+            text(format!(
+                "{}.{}",
+                column_metadata.schema_name, column_metadata.table_name
+            ))
+            .size(12)
+            .style(text::secondary),
+            space::vertical().height(8),
+            Column::from_iter(rows).spacing(4),
+        ]
+        .spacing(4),
+    )
+    .padding(8)
+    .into()
+}
+
+fn view_table_details<'a>(table_metadata: &'a TableMetadata) -> Element<'a, SchemaExplorerMessage> {
+    let primary_key_text = if table_metadata.primary_key.is_empty() {
+        "(none)".to_string()
+    } else {
+        format!("({})", table_metadata.primary_key.join(", "))
+    };
+
+    let mut columns: Vec<Element<'_, SchemaExplorerMessage>> = vec![section_label("Columns")];
+    columns.extend(table_metadata.columns.iter().map(view_table_column_row));
+
+    let mut constraints: Vec<Element<'_, SchemaExplorerMessage>> = vec![
+        section_label("Constraints"),
+        detail_row("Primary key", primary_key_text),
+    ];
+    for foreign_key in &table_metadata.foreign_keys {
+        constraints.push(detail_row(
+            format!("FK {}", foreign_key.column),
+            format!(
+                "{}.{}.{}",
+                foreign_key.references.schema,
+                foreign_key.references.table,
+                foreign_key.references.column
+            ),
+        ));
+    }
+
+    let column_details = table_metadata.columns.iter().map(view_column_details);
+
+    container(
+        scrollable(
+            column![
+                text(format!("{}.{}", table_metadata.schema, table_metadata.name)).size(16),
+                space::vertical().height(8),
+                Column::from_iter(columns).spacing(3),
+                space::vertical().height(12),
+                Column::from_iter(constraints).spacing(3),
+                Column::from_iter(column_details).spacing(3)
+            ]
+            .spacing(4),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill),
+    )
+    .padding(8)
+    .into()
+}
+
+fn view_table_column_row(column: &ColumnMetadata) -> Element<'_, SchemaExplorerMessage> {
+    let mut badges: Vec<Element<'_, SchemaExplorerMessage>> = Vec::new();
+    if column.is_primary_key {
+        badges.push(key_badge("PK", Color::from_rgb8(196, 156, 54)));
+    }
+    if column.is_foreign_key {
+        badges.push(key_badge("FK", Color::from_rgb8(54, 156, 140)));
+    }
+
+    row![
+        text(column.name.as_str()).size(12),
+        space::horizontal().width(6),
+        text(column.data_type.as_str())
+            .size(12)
+            .style(text::secondary),
+    ]
+    .extend(badges)
+    .spacing(4)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+fn key_badge<'a>(label: &'a str, color: Color) -> Element<'a, SchemaExplorerMessage> {
+    container(text(label).size(9).color(Color::WHITE))
+        .style(move |_| container::Style {
+            background: Some(color.into()),
+            border: iced::Border {
+                radius: 3.0.into(),
+                width: 0.0,
+                color: iced::Color::TRANSPARENT,
+            },
+            ..Default::default()
+        })
+        .padding([0, 3])
+        .into()
+}
+
+fn detail_row(
+    label: impl Into<String>,
+    value: impl Into<String>,
+) -> Element<'static, SchemaExplorerMessage> {
+    row![
+        text(label.into()).size(12).style(text::secondary),
+        space::horizontal().width(8),
+        text(value.into()).size(12),
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+fn section_label<'a>(label: &'a str) -> Element<'a, SchemaExplorerMessage> {
+    text(label)
+        .size(11)
+        .style(|theme| text::secondary(theme))
+        .into()
 }
 
 fn view_column_metadata(column_metadata: &ColumnMetadata) -> Element<'_, SchemaExplorerMessage> {
@@ -595,7 +782,11 @@ fn view_column_metadata(column_metadata: &ColumnMetadata) -> Element<'_, SchemaE
             .style(|theme| text::secondary(theme))
             .size(12),
             space::horizontal().width(4),
-            text(column_metadata.name.as_str()).size(12)
+            text(column_metadata.name.as_str()).size(12),
+            space::horizontal().width(4),
+            text(column_metadata.data_type.as_str())
+                .size(12)
+                .style(text::secondary)
         ]
         .align_y(Alignment::Center)
         .wrap(),
