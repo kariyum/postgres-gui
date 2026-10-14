@@ -457,6 +457,14 @@ impl App {
                 .map(Message::DialogMessage),
             Message::CommandPalette(message) => match message {
                 command_palette::Message::ExploreSchema => self.open_schema_explorer(),
+                command_palette::Message::ConnectionsRequested => Task::done(
+                    Message::CommandPalette(command_palette::Message::ShowConnections(
+                        self.app_config.connections.clone(),
+                    )),
+                ),
+                command_palette::Message::ConnectionSelected(config) => {
+                    self.open_query_editor(config)
+                }
                 _ => self
                     .command_palette
                     .update(message)
@@ -512,6 +520,16 @@ impl App {
             PaneKind::AgentChat,
         ) {
             self.agent_chat_pane = Some(agent_pane);
+        }
+    }
+
+    fn open_query_editor(&mut self, config: connection_config::ConnectionConfig) -> Task<Message> {
+        match self.database_keeper_actor_tx {
+            Some(ref tx) => Task::done(Message::Editor(editor::Message::Add(EditorConfig::new(
+                config,
+                tx.clone(),
+            )))),
+            None => Task::none(),
         }
     }
 
@@ -877,25 +895,23 @@ impl App {
 
     pub fn key_press_handler(&self) -> Subscription<Message> {
         iced::event::listen_with(|event, _status, _window| match event {
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                ..
-            }) => match (modifiers, key.as_ref()) {
-                (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("=")) => {
-                    Some(Message::ZoomIn)
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                match (modifiers, key.as_ref()) {
+                    (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("=")) => {
+                        Some(Message::ZoomIn)
+                    }
+                    (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("-")) => {
+                        Some(Message::ZoomOut)
+                    }
+                    (modifiers, iced::keyboard::Key::Character("p" | "P"))
+                        if modifiers.control() && modifiers.shift() =>
+                    {
+                        Some(Message::CommandPalette(command_palette::Message::Toggle))
+                    }
+                    (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
+                    _ => None,
                 }
-                (iced::keyboard::Modifiers::CTRL, iced::keyboard::Key::Character("-")) => {
-                    Some(Message::ZoomOut)
-                }
-                (modifiers, iced::keyboard::Key::Character("p" | "P"))
-                    if modifiers.control() && modifiers.shift() =>
-                {
-                    Some(Message::CommandPalette(command_palette::Message::Toggle))
-                }
-                (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
-                _ => None,
-            },
+            }
             _ => None,
         })
     }

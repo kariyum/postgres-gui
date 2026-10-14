@@ -1,4 +1,3 @@
-use anyhow::Context;
 use iced::{
     Element, Length, Task,
     widget::{self, Row, column, container, scrollable, space},
@@ -9,7 +8,7 @@ use crate::components::editor_config::{self, EditorConfig, EditorId};
 #[derive(Debug, Clone)]
 pub struct Editor {
     windows: Vec<EditorConfig>,
-    focused_tab_index: Option<usize>,
+    focused: Option<EditorId>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,7 +23,7 @@ impl Default for Editor {
     fn default() -> Self {
         Self {
             windows: Vec::new(),
-            focused_tab_index: None,
+            focused: None,
         }
     }
 }
@@ -32,6 +31,12 @@ impl Default for Editor {
 impl Editor {
     fn index_of(&self, id: EditorId) -> Option<usize> {
         self.windows.iter().position(|config| config.id() == id)
+    }
+
+    fn focused_window(&self) -> Option<&EditorConfig> {
+        self.focused
+            .and_then(|id| self.windows.iter().find(|config| config.id() == id))
+            .or(self.windows.last())
     }
 
     pub fn view(&self) -> Option<Element<'_, Message>> {
@@ -48,12 +53,8 @@ impl Editor {
     }
 
     fn view_editor(&self) -> Element<'_, Message> {
-        let window = self
-            .windows
-            .get(self.focused_tab_index.unwrap_or(0))
-            .context("Did not find EditorConfig in self.windows");
-        match window {
-            Ok(window) => {
+        match self.focused_window() {
+            Some(window) => {
                 let id = window.id();
                 column![
                     self.view_header(),
@@ -66,9 +67,9 @@ impl Editor {
                 .into()
             }
 
-            Err(err) => {
-                tracing::error!("{err}");
-                return space().into();
+            None => {
+                tracing::error!("Did not find EditorConfig in self.windows");
+                space().into()
             }
         }
     }
@@ -82,7 +83,7 @@ impl Editor {
                         .map(|window| {
                             let id = window.id();
                             window
-                                .view_header()
+                                .view_header(self.focused == Some(id))
                                 .map(move |msg| Message::EditorConfigMessage(id, msg))
                                 .into()
                         })
@@ -110,18 +111,27 @@ impl Editor {
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
             Message::Add(editor_config) => {
+                self.focused = Some(editor_config.id());
                 self.windows.push(editor_config);
                 Task::none()
             }
             Message::Close(id) => {
                 if let Some(idx) = self.index_of(id) {
                     self.windows.remove(idx);
+                    if self.focused == Some(id) {
+                        let neighbour = if idx > 0 {
+                            self.windows.get(idx - 1)
+                        } else {
+                            self.windows.get(idx)
+                        };
+                        self.focused = neighbour.map(|config| config.id());
+                    }
                 }
                 Task::none()
             }
             Message::Focus(id) => {
-                if let Some(index) = self.index_of(id) {
-                    self.focused_tab_index = Some(index);
+                if self.index_of(id).is_some() {
+                    self.focused = Some(id);
                 }
                 Task::none()
             }

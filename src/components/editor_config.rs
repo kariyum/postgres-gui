@@ -172,7 +172,7 @@ impl EditorConfig {
         self.config.connection_string()
     }
 
-    pub fn view_header(&self) -> Element<'_, Message> {
+    pub fn view_header(&self, is_focused: bool) -> Element<'_, Message> {
         let close_btn = button(
             svg(svg::Handle::from_memory(include_bytes!(
                 "../resources/x.svg"
@@ -203,9 +203,14 @@ impl EditorConfig {
         .on_press(Message::Select)
         .padding([4, 6])
         .height(Length::Fill)
-        .style(|_theme, _status| button::Style {
+        .style(move |theme, status| button::Style {
             border: iced::Border::default().width(0),
-            ..button::background(_theme, _status)
+            background: if matches!(status, button::Status::Active) && !is_focused {
+                Some(theme.palette().background.weakest.color.into())
+            } else {
+                button::background(theme, status).background
+            },
+            ..button::background(theme, status)
         })
         .into()
     }
@@ -325,4 +330,3 @@ impl EditorConfig {
             .into()
     }
 }
-
