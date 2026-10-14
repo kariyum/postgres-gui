@@ -24,12 +24,17 @@ enum Stage {
 pub enum Message {
     Toggle,
     Hide,
-    ExploreSchema,
-    ConnectionsRequested,
     ShowConnections(Vec<ConnectionConfig>),
-    ConnectionSelected(ConnectionConfig),
+    Event(Event),
     CommandList(command_list::Message),
     ConnectionPicker(connection_picker::Message),
+}
+
+#[derive(Debug, Clone)]
+pub enum Event {
+    ExploreSchema,
+    ConnectionsRequested,
+    ConnectionSelected(ConnectionConfig),
 }
 
 impl Default for CommandPalette {
@@ -63,9 +68,7 @@ impl CommandPalette {
                 self.hide();
                 Task::none()
             }
-            Message::ExploreSchema
-            | Message::ConnectionsRequested
-            | Message::ConnectionSelected(_) => Task::none(),
+            Message::Event(_) => Task::none(),
             Message::ShowConnections(connections) => {
                 self.stage = Stage::Connections(ConnectionPicker::new(connections));
                 operation::focus(Id::new(connection_picker::INPUT_ID))
@@ -77,7 +80,7 @@ impl CommandPalette {
             },
             Message::ConnectionPicker(connection_picker::Message::Selected(connection)) => {
                 self.hide();
-                Task::done(Message::ConnectionSelected(connection))
+                Task::done(Message::Event(Event::ConnectionSelected(connection)))
             }
             Message::ConnectionPicker(message) => match &mut self.stage {
                 Stage::Connections(picker) => picker.update(message).map(Message::ConnectionPicker),
@@ -90,9 +93,11 @@ impl CommandPalette {
         match action {
             CommandAction::ExploreSchema => {
                 self.hide();
-                Task::done(Message::ExploreSchema)
+                Task::done(Message::Event(Event::ExploreSchema))
             }
-            CommandAction::OpenConnectionQueryEditor => Task::done(Message::ConnectionsRequested),
+            CommandAction::OpenConnectionQueryEditor => {
+                Task::done(Message::Event(Event::ConnectionsRequested))
+            }
             CommandAction::Settings => Task::none(),
             CommandAction::Quit => todo!(),
             CommandAction::ToggleAssistant => todo!(),

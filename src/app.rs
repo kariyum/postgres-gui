@@ -456,15 +456,7 @@ impl App {
                 .update(dialog_message)
                 .map(Message::DialogMessage),
             Message::CommandPalette(message) => match message {
-                command_palette::Message::ExploreSchema => self.open_schema_explorer(),
-                command_palette::Message::ConnectionsRequested => Task::done(
-                    Message::CommandPalette(command_palette::Message::ShowConnections(
-                        self.app_config.connections.clone(),
-                    )),
-                ),
-                command_palette::Message::ConnectionSelected(config) => {
-                    self.open_query_editor(config)
-                }
+                command_palette::Message::Event(event) => self.handle_command_palette_event(event),
                 _ => self
                     .command_palette
                     .update(message)
@@ -520,6 +512,16 @@ impl App {
             PaneKind::AgentChat,
         ) {
             self.agent_chat_pane = Some(agent_pane);
+        }
+    }
+
+    fn handle_command_palette_event(&mut self, event: command_palette::Event) -> Task<Message> {
+        match event {
+            command_palette::Event::ExploreSchema => self.open_schema_explorer(),
+            command_palette::Event::ConnectionsRequested => Task::done(Message::CommandPalette(
+                command_palette::Message::ShowConnections(self.app_config.connections.clone()),
+            )),
+            command_palette::Event::ConnectionSelected(config) => self.open_query_editor(config),
         }
     }
 
