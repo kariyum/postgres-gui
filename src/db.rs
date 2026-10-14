@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Column, PgPool, Row, TypeInfo};
+use sqlx::postgres::{PgHasArrayType, PgPoolOptions, PgRow};
+use sqlx::types::chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use sqlx::types::{Decimal, JsonValue, Uuid};
+use sqlx::{Column, Decode, PgPool, Postgres, Row, Type, TypeInfo, ValueRef};
 
 use crate::types::{
     ColumnInfo, ForeignKeyRef, QueryResult, ResultColumn, ResultRow, SchemaInfo, TableInfo,
@@ -89,56 +91,91 @@ pub async fn execute_query(pool: &PgPool, sql: &str) -> Result<QueryResult, Stri
     }
 }
 
-fn cell_to_string(row: &sqlx::postgres::PgRow, idx: usize, type_name: &str) -> String {
-    match type_name {
-        "INT2" => {
-            if let Ok(v) = row.try_get::<i16, _>(idx) {
-                return v.to_string();
-            }
-        }
-        "INT4" => {
-            if let Ok(v) = row.try_get::<i32, _>(idx) {
-                return v.to_string();
-            }
-        }
-        "INT8" => {
-            if let Ok(v) = row.try_get::<i64, _>(idx) {
-                return v.to_string();
-            }
-        }
-        "FLOAT4" => {
-            if let Ok(v) = row.try_get::<f32, _>(idx) {
-                return v.to_string();
-            }
-        }
-        "FLOAT8" => {
-            if let Ok(v) = row.try_get::<f64, _>(idx) {
-                return v.to_string();
-            }
-        }
-        "BOOL" => {
-            if let Ok(v) = row.try_get::<bool, _>(idx) {
-                return v.to_string();
-            }
-        }
-        _ => {}
-    }
+fn cell_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
+    let decoded = match type_name {
+        "BOOL" => scalar::<bool>(row, idx),
+        "INT2" => scalar::<i16>(row, idx),
+        "INT4" => scalar::<i32>(row, idx),
+        "INT8" => scalar::<i64>(row, idx),
+        "FLOAT4" => scalar::<f32>(row, idx),
+        "FLOAT8" => scalar::<f64>(row, idx),
+        "NUMERIC" => scalar::<Decimal>(row, idx),
+        "UUID" => scalar::<Uuid>(row, idx),
+        "DATE" => scalar::<NaiveDate>(row, idx),
+        "TIME" => scalar::<NaiveTime>(row, idx),
+        "TIMESTAMP" => scalar::<NaiveDateTime>(row, idx),
+        "TIMESTAMPTZ" => scalar::<DateTime<Utc>>(row, idx),
+        "JSON" | "JSONB" => scalar::<JsonValue>(row, idx),
+        "BYTEA" => decode(row, idx, |bytes: Vec<u8>| {
+            format!("\\x{}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        }),
+        "_BOOL" => array::<bool>(row, idx),
+        "_INT2" => array::<i16>(row, idx),
+        "_INT4" => array::<i32>(row, idx),
+        "_INT8" => array::<i64>(row, idx),
+        "_FLOAT4" => array::<f32>(row, idx),
+        "_FLOAT8" => array::<f64>(row, idx),
+        "_NUMERIC" => array::<Decimal>(row, idx),
+        "_UUID" => array::<Uuid>(row, idx),
+        "_TEXT" | "_VARCHAR" | "_BPCHAR" | "_NAME" => array::<String>(row, idx),
+        _ => None,
+    };
 
-    // Fallback: try text, then NULL
-    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return match v {
-            Some(s) => s.replace('\r', "\\r").replace('\n', "\\n"),
-            None => "NULL".to_string(),
-        };
-    }
-    if let Ok(v) = row.try_get::<Option<&str>, _>(idx) {
-        return match v {
-            Some(s) => s.replace('\r', "\\r").replace('\n', "\\n"),
-            None => "NULL".to_string(),
-        };
-    }
+    decoded
+        .or_else(|| raw_text(row, idx))
+        .unwrap_or_else(|| format!("<{}>", type_name.to_lowercase()))
+}
 
-    "NULL".to_string()
+/// Decode a cell as `T` and convert it with `to_text`. Returns `None` if the
+/// column can't be decoded as `T`, and `"NULL"` for SQL NULL.
+fn decode<T>(row: &PgRow, idx: usize, to_text: impl FnOnce(T) -> String) -> Option<String>
+where
+    T: for<'r> Decode<'r, Postgres> + Type<Postgres>,
+{
+    match row.try_get::<Option<T>, _>(idx) {
+        Ok(Some(v)) => Some(to_text(v)),
+        Ok(None) => Some("NULL".to_string()),
+        Err(_) => None,
+    }
+}
+
+fn scalar<T>(row: &PgRow, idx: usize) -> Option<String>
+where
+    T: ToString + for<'r> Decode<'r, Postgres> + Type<Postgres>,
+{
+    decode::<T>(row, idx, |v| v.to_string())
+}
+
+fn array<T>(row: &PgRow, idx: usize) -> Option<String>
+where
+    T: ToString + PgHasArrayType + for<'r> Decode<'r, Postgres> + Type<Postgres>,
+{
+    decode::<Vec<Option<T>>>(row, idx, format_array)
+}
+
+/// Fallback: read the raw wire value as UTF-8. Enum labels and other
+/// text-like custom types are plain UTF-8 in both text and binary format.
+fn raw_text(row: &PgRow, idx: usize) -> Option<String> {
+    let raw = row.try_get_raw(idx).ok()?;
+    if raw.is_null() {
+        return Some("NULL".to_string());
+    }
+    raw.as_str().ok().map(escape_newlines)
+}
+
+fn escape_newlines(s: &str) -> String {
+    s.replace('\r', "\\r").replace('\n', "\\n")
+}
+
+fn format_array<T: ToString>(items: Vec<Option<T>>) -> String {
+    let parts: Vec<String> = items
+        .into_iter()
+        .map(|item| match item {
+            Some(v) => escape_newlines(&v.to_string()),
+            None => "NULL".to_string(),
+        })
+        .collect();
+    format!("{{{}}}", parts.join(","))
 }
 
 /// Fetch the full schema (schemas, tables, and columns) for the schema explorer.
