@@ -35,6 +35,7 @@ pub enum SchemaExplorerMessage {
     },
     ClosePicker,
     OpenPicker,
+    RefreshSchema,
     Browser(SchemaBrowserMessage),
 }
 
@@ -111,6 +112,7 @@ impl SchemaExplorer {
                 Task::none()
             }
             SchemaExplorerMessage::OpenPicker => self.open_picker(),
+            SchemaExplorerMessage::RefreshSchema => self.refresh_schema(),
             SchemaExplorerMessage::Browser(message) => match &mut self.stage {
                 Stage::Browse(browser) => {
                     browser.update(message).map(SchemaExplorerMessage::Browser)
@@ -118,6 +120,36 @@ impl SchemaExplorer {
                 Stage::Empty => Task::none(),
             },
         }
+    }
+
+    fn refresh_schema(&mut self) -> Task<SchemaExplorerMessage> {
+        let Some(mut actor) = self.database_keeper.clone() else {
+            return Task::none();
+        };
+        let Stage::Browse(browser) = &mut self.stage else {
+            return Task::none();
+        };
+        if browser.is_loading() {
+            return Task::none();
+        }
+
+        let connection = browser.connection().to_string();
+        let reset = browser.begin_refresh().map(SchemaExplorerMessage::Browser);
+        let loaded_connection = connection.clone();
+        Task::batch([
+            reset,
+            Task::perform(
+                async move {
+                    database_keeper::refresh_schema(&mut actor, &connection)
+                        .await
+                        .map_err(|e| e.to_string())
+                },
+                move |result| SchemaExplorerMessage::SchemaLoaded {
+                    connection: loaded_connection,
+                    result,
+                },
+            ),
+        ])
     }
 
     fn select_connection(&mut self, name: String) -> Task<SchemaExplorerMessage> {
@@ -176,8 +208,25 @@ impl SchemaExplorer {
                 .into()
         };
 
-        let header = row![text(title).size(14), space::horizontal(), switch_button]
-            .align_y(Alignment::Center);
+        let refresh_button: Element<'_, SchemaExplorerMessage> = match &self.stage {
+            Stage::Browse(browser) if !self.names.is_empty() => button(text("Refresh").size(12))
+                .on_press_maybe(
+                    (!browser.is_loading()).then_some(SchemaExplorerMessage::RefreshSchema),
+                )
+                .padding([2, 8])
+                .style(button::subtle)
+                .into(),
+            _ => space::horizontal().into(),
+        };
+
+        let header = row![
+            text(title).size(14),
+            space::horizontal(),
+            refresh_button,
+            switch_button
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
 
         let body: Element<'_, SchemaExplorerMessage> = if self.names.is_empty() {
             text("No connections yet. Add a connection to explore its schema.")

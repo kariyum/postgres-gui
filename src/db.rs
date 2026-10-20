@@ -6,8 +6,8 @@ use sqlx::types::{Decimal, JsonValue, Uuid};
 use sqlx::{Column, Decode, PgPool, Postgres, Row, Type, TypeInfo, ValueRef};
 
 use crate::types::{
-    ColumnInfo, ForeignKeyRef, IndexInfo, QueryResult, ResultColumn, ResultRow, RoutineInfo,
-    RoutineKind, SchemaInfo, TableInfo,
+    ColumnInfo, ConstraintInfo, ConstraintKind, ForeignKeyRef, IndexInfo, QueryResult,
+    ResultColumn, ResultRow, RoutineInfo, RoutineKind, SchemaInfo, TableInfo,
 };
 
 /// Connect to a PostgreSQL database and return a pool.
@@ -298,6 +298,7 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
                 schema.tables.push(TableInfo {
                     name: table_name.clone(),
                     columns: Vec::new(),
+                    constraints: Vec::new(),
                 });
                 schema.tables.last_mut().unwrap()
             }
@@ -382,6 +383,48 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
                 definition,
                 is_unique,
             });
+    }
+
+    let constraint_rows = sqlx::query(
+        "SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, \
+                con.conname::text AS name, con.contype::text AS kind, \
+                pg_get_constraintdef(con.oid) AS definition \
+         FROM pg_catalog.pg_constraint con \
+         JOIN pg_catalog.pg_class c ON c.oid = con.conrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE con.contype IN ('p', 'f', 'u', 'c', 'x') \
+           AND n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
+         ORDER BY n.nspname, c.relname, con.conname",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for row in &constraint_rows {
+        let schema_name: String = row.try_get("schema_name").map_err(|e| e.to_string())?;
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let name: String = row.try_get("name").map_err(|e| e.to_string())?;
+        let kind: String = row.try_get("kind").map_err(|e| e.to_string())?;
+        let definition: String = row.try_get("definition").map_err(|e| e.to_string())?;
+
+        let kind = match kind.as_str() {
+            "p" => ConstraintKind::PrimaryKey,
+            "f" => ConstraintKind::ForeignKey,
+            "u" => ConstraintKind::Unique,
+            "c" => ConstraintKind::Check,
+            _ => ConstraintKind::Exclusion,
+        };
+        let table = schemas
+            .iter_mut()
+            .find(|s| s.name == schema_name)
+            .and_then(|s| s.tables.iter_mut().find(|t| t.name == table_name));
+        if let Some(table) = table {
+            table.constraints.push(ConstraintInfo {
+                name,
+                kind,
+                definition,
+            });
+        }
     }
 
     schemas.sort_by(|a, b| a.name.cmp(&b.name));

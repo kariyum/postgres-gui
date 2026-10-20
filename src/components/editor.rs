@@ -1,6 +1,6 @@
 use iced::{
     Element, Length, Task,
-    widget::{self, Row, column, container, scrollable, space},
+    widget::{self, Row, button, column, container, row, scrollable, space, text},
 };
 
 use crate::components::editor_config::{self, EditorConfig, EditorId};
@@ -16,6 +16,7 @@ pub enum Message {
     Add(EditorConfig),
     Close(EditorId),
     Focus(EditorId),
+    NewRequested,
     EditorConfigMessage(EditorId, editor_config::Message),
 }
 
@@ -75,37 +76,43 @@ impl Editor {
     }
 
     fn view_header(&self) -> Element<'_, Message> {
-        container(
-            scrollable(
-                Row::from_vec(
-                    self.windows
-                        .iter()
-                        .map(|window| {
-                            let id = window.id();
-                            window
-                                .view_header(self.focused == Some(id))
-                                .map(move |msg| Message::EditorConfigMessage(id, msg))
-                                .into()
-                        })
-                        .collect(),
-                )
-                .spacing(1),
+        let tabs = scrollable(
+            Row::from_vec(
+                self.windows
+                    .iter()
+                    .map(|window| {
+                        let id = window.id();
+                        window
+                            .view_header(self.focused == Some(id))
+                            .map(move |msg| Message::EditorConfigMessage(id, msg))
+                            .into()
+                    })
+                    .collect(),
             )
-            .direction(widget::scrollable::Direction::Horizontal(
-                widget::scrollable::Scrollbar::default(),
-            )),
+            .spacing(1),
         )
-        .width(Length::Fill)
-        .height(30)
-        .style(|theme: &iced::Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(palette.background.weakest.color.into()),
-                border: iced::Border::default().width(0),
-                ..Default::default()
-            }
-        })
-        .into()
+        .direction(widget::scrollable::Direction::Horizontal(
+            widget::scrollable::Scrollbar::default(),
+        ))
+        .width(Length::Fill);
+
+        let new_button = button(text("+").size(14))
+            .on_press(Message::NewRequested)
+            .padding([0, 8])
+            .style(button::subtle);
+
+        container(row![tabs, new_button].align_y(iced::Alignment::Center))
+            .width(Length::Fill)
+            .height(30)
+            .style(|theme: &iced::Theme| {
+                let palette = theme.palette();
+                container::Style {
+                    background: Some(palette.background.weakest.color.into()),
+                    border: iced::Border::default().width(0),
+                    ..Default::default()
+                }
+            })
+            .into()
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
@@ -135,6 +142,7 @@ impl Editor {
                 }
                 Task::none()
             }
+            Message::NewRequested => Task::none(),
             Message::EditorConfigMessage(id, msg) => match msg {
                 editor_config::Message::Select => Task::done(Message::Focus(id)),
                 editor_config::Message::Close => Task::done(Message::Close(id)),

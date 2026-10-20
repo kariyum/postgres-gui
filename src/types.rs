@@ -74,11 +74,30 @@ pub struct ColumnInfo {
     pub references: Option<ForeignKeyRef>,
 }
 
-/// A table and its columns within a database schema.
+/// The kind of a table constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintKind {
+    PrimaryKey,
+    ForeignKey,
+    Unique,
+    Check,
+    Exclusion,
+}
+
+/// A constraint defined on a table.
+#[derive(Debug, Clone)]
+pub struct ConstraintInfo {
+    pub name: String,
+    pub kind: ConstraintKind,
+    pub definition: String,
+}
+
+/// A table and its columns and constraints within a database schema.
 #[derive(Debug, Clone)]
 pub struct TableInfo {
     pub name: String,
     pub columns: Vec<ColumnInfo>,
+    pub constraints: Vec<ConstraintInfo>,
 }
 
 /// Whether a routine is a function or a procedure.

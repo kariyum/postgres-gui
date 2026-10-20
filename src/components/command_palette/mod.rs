@@ -70,6 +70,7 @@ impl CommandPalette {
             }
             Message::Event(_) => Task::none(),
             Message::ShowConnections(connections) => {
+                self.is_visible = true;
                 self.stage = Stage::Connections(ConnectionPicker::new(connections));
                 operation::focus(Id::new(connection_picker::INPUT_ID))
             }

@@ -43,6 +43,10 @@ pub enum DatabaseKeeperMessage {
         database_name: String,
         respond: oneshot::Sender<Result<Schema, ToolError>>,
     },
+    RefreshSchema {
+        database_name: String,
+        respond: oneshot::Sender<Result<Schema, ToolError>>,
+    },
     ConnectDatabase {
         database_name: String,
         respond: oneshot::Sender<Result<String, ToolError>>,
@@ -112,6 +116,14 @@ impl DatabaseKeeper {
                     database_name,
                     respond,
                 } => {
+                    let result = self.get_schema(&database_name).await;
+                    let _ = respond.send(result);
+                }
+                DatabaseKeeperMessage::RefreshSchema {
+                    database_name,
+                    respond,
+                } => {
+                    self.schemas.retain(|s| s.connection != database_name);
                     let result = self.get_schema(&database_name).await;
                     let _ = respond.send(result);
                 }
@@ -289,6 +301,22 @@ pub async fn get_schema(
     let (tx, rx) = oneshot::channel();
     actor
         .send(DatabaseKeeperMessage::GetSchema {
+            database_name: database_name.to_string(),
+            respond: tx,
+        })
+        .await
+        .map_err(|_| ToolError("Database actor is not running".into()))?;
+    rx.await
+        .map_err(|_| ToolError("Database actor did not respond".into()))?
+}
+
+pub async fn refresh_schema(
+    actor: &mut mpsc::Sender<DatabaseKeeperMessage>,
+    database_name: &str,
+) -> Result<Schema, ToolError> {
+    let (tx, rx) = oneshot::channel();
+    actor
+        .send(DatabaseKeeperMessage::RefreshSchema {
             database_name: database_name.to_string(),
             respond: tx,
         })

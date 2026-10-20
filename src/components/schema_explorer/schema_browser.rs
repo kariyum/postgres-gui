@@ -5,7 +5,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Color, Element, Length, Task, border};
 
-use crate::types::{ForeignKeyRef, RoutineKind, Schema};
+use crate::types::{ConstraintInfo, ConstraintKind, ForeignKeyRef, RoutineKind, Schema};
 
 const SEARCH_QUERY_INPUT_ID: &str = "search_query_picker_input";
 const LIST_ID: &str = "schema_browser_list";
@@ -54,27 +54,11 @@ impl From<Schema> for DatabaseMetadata {
                     schemas.push(Metadata::Column(column.clone()));
                 }
 
-                let primary_key: Vec<String> = columns
-                    .iter()
-                    .filter(|column| column.is_primary_key)
-                    .map(|column| column.name.clone())
-                    .collect();
-                let foreign_keys: Vec<TableForeignKey> = columns
-                    .iter()
-                    .filter_map(|column| {
-                        column.references.as_ref().map(|reference| TableForeignKey {
-                            column: column.name.clone(),
-                            references: reference.clone(),
-                        })
-                    })
-                    .collect();
-
                 schemas.push(Metadata::Table(TableMetadata {
                     schema: schema_info.name.clone(),
                     name: table.name.clone(),
                     columns,
-                    primary_key,
-                    foreign_keys,
+                    constraints: table.constraints,
                 }));
             }
 
@@ -109,14 +93,7 @@ pub struct TableMetadata {
     schema: String,
     name: String,
     columns: Vec<ColumnMetadata>,
-    primary_key: Vec<String>,
-    foreign_keys: Vec<TableForeignKey>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TableForeignKey {
-    column: String,
-    references: ForeignKeyRef,
+    constraints: Vec<ConstraintInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +198,16 @@ impl SchemaBrowser {
 
     pub fn connection(&self) -> &str {
         &self.connection
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    pub fn begin_refresh(&mut self) -> Task<SchemaBrowserMessage> {
+        self.loading = true;
+        self.error = None;
+        self.reset_scroll()
     }
 
     pub fn apply_loaded(&mut self, result: Result<Schema, String>) {
@@ -618,30 +605,15 @@ fn view_column_details<'a>(
 }
 
 fn view_table_details<'a>(table_metadata: &'a TableMetadata) -> Element<'a, SchemaBrowserMessage> {
-    let primary_key_text = if table_metadata.primary_key.is_empty() {
-        "(none)".to_string()
-    } else {
-        format!("({})", table_metadata.primary_key.join(", "))
-    };
-
     let mut columns: Vec<Element<'_, SchemaBrowserMessage>> = vec![section_label("Columns")];
     columns.extend(table_metadata.columns.iter().map(view_table_column_row));
 
-    let mut constraints: Vec<Element<'_, SchemaBrowserMessage>> = vec![
-        section_label("Constraints"),
-        detail_row("Primary key", primary_key_text),
-    ];
-    for foreign_key in &table_metadata.foreign_keys {
-        constraints.push(detail_row(
-            format!("FK {}", foreign_key.column),
-            format!(
-                "{}.{}.{}",
-                foreign_key.references.schema,
-                foreign_key.references.table,
-                foreign_key.references.column
-            ),
-        ));
+    let mut constraints: Vec<Element<'_, SchemaBrowserMessage>> =
+        vec![section_label("Constraints")];
+    if table_metadata.constraints.is_empty() {
+        constraints.push(text("(none)").size(12).style(text::secondary).into());
     }
+    constraints.extend(table_metadata.constraints.iter().map(view_constraint_row));
 
     let column_details = table_metadata.columns.iter().map(view_column_details);
 
@@ -661,6 +633,30 @@ fn view_table_details<'a>(table_metadata: &'a TableMetadata) -> Element<'a, Sche
         .width(Length::Fill),
     )
     .padding(8)
+    .into()
+}
+
+fn view_constraint_row(constraint: &ConstraintInfo) -> Element<'_, SchemaBrowserMessage> {
+    let (label, color) = match constraint.kind {
+        ConstraintKind::PrimaryKey => ("PK", Color::from_rgb8(196, 156, 54)),
+        ConstraintKind::ForeignKey => ("FK", Color::from_rgb8(54, 156, 140)),
+        ConstraintKind::Unique => ("UNIQUE", Color::from_rgb8(64, 105, 153)),
+        ConstraintKind::Check => ("CHECK", Color::from_rgb8(110, 64, 153)),
+        ConstraintKind::Exclusion => ("EXCLUDE", Color::from_rgb8(120, 120, 120)),
+    };
+
+    column![
+        row![
+            key_badge(label, color),
+            text(constraint.name.as_str()).size(12),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center),
+        text(constraint.definition.as_str())
+            .size(11)
+            .style(text::secondary),
+    ]
+    .spacing(2)
     .into()
 }
 
