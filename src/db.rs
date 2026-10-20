@@ -109,15 +109,15 @@ fn cell_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
         "BYTEA" => decode(row, idx, |bytes: Vec<u8>| {
             format!("\\x{}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
         }),
-        "_BOOL" => array::<bool>(row, idx),
-        "_INT2" => array::<i16>(row, idx),
-        "_INT4" => array::<i32>(row, idx),
-        "_INT8" => array::<i64>(row, idx),
-        "_FLOAT4" => array::<f32>(row, idx),
-        "_FLOAT8" => array::<f64>(row, idx),
-        "_NUMERIC" => array::<Decimal>(row, idx),
-        "_UUID" => array::<Uuid>(row, idx),
-        "_TEXT" | "_VARCHAR" | "_BPCHAR" | "_NAME" => array::<String>(row, idx),
+        "BOOL[]" => array::<bool>(row, idx),
+        "INT2[]" => array::<i16>(row, idx),
+        "INT4[]" => array::<i32>(row, idx),
+        "INT8[]" => array::<i64>(row, idx),
+        "FLOAT4[]" => array::<f32>(row, idx),
+        "FLOAT8[]" => array::<f64>(row, idx),
+        "NUMERIC[]" => array::<Decimal>(row, idx),
+        "UUID[]" => array::<Uuid>(row, idx),
+        "TEXT[]" | "VARCHAR[]" | "CHAR[]" | "NAME[]" => array::<String>(row, idx),
         _ => None,
     };
 

@@ -30,6 +30,7 @@ use crate::core::configured_provider::{BaseProvider, ConfiguredProvider};
 use crate::core::database_keeper::{self, DatabaseKeeper};
 use crate::db;
 use crate::types::{Schema, SchemaInfo};
+use crate::widgets::palette::PaletteMessage;
 use iced_aw::drop_down;
 
 #[derive(Debug, Clone)]
@@ -64,6 +65,7 @@ pub enum Message {
     CommandPalette(command_palette::Message),
     SchemaExplorer(SchemaExplorerMessage),
     OpenSchemaExplorer,
+    ToggleSchemaExplorer,
     FetchSchema {
         connection: String,
         pool: sqlx::PgPool,
@@ -83,6 +85,7 @@ pub enum Message {
 pub enum PaneKind {
     Main,
     AgentChat,
+    SchemaExplorer,
 }
 
 #[derive(Debug)]
@@ -99,7 +102,7 @@ pub struct App {
     pub pending_save: bool,
     panes: pane_grid::State<PaneKind>,
     main_pane: pane_grid::Pane,
-    agent_chat_pane: Option<pane_grid::Pane>,
+    side_pane: Option<pane_grid::Pane>,
     editor: Editor,
     database_keeper_actor_tx: Option<Sender<DatabaseKeeperMessage>>,
     app_config: AppConfig,
@@ -123,7 +126,7 @@ impl Default for App {
             pending_save: false,
             panes: pane,
             main_pane,
-            agent_chat_pane: None,
+            side_pane: None,
             editor: Editor::default(),
             database_keeper_actor_tx: None,
             app_config: AppConfig::default(),
@@ -284,11 +287,10 @@ impl App {
                 Task::none()
             }
             Message::ToggleAgentMenu => {
-                if let Some(pane) = self.agent_chat_pane {
-                    self.panes.close(pane);
-                    self.agent_chat_pane = None;
+                if matches!(self.side_pane_kind(), Some(PaneKind::AgentChat)) {
+                    self.close_side_pane();
                 } else if self.agent_chat.is_some() {
-                    self.add_agent_chat_pane();
+                    self.open_side_pane(PaneKind::AgentChat);
                 } else {
                     self.agent_menu_open = !self.agent_menu_open;
                 }
@@ -311,7 +313,7 @@ impl App {
 
                     self.agent_chat = Some(AgentChat::new(provider, tx.clone()));
                     self.agent_menu_open = false;
-                    self.add_agent_chat_pane();
+                    self.open_side_pane(PaneKind::AgentChat);
                 }
                 Task::none()
             }
@@ -462,11 +464,29 @@ impl App {
                     .update(message)
                     .map(Message::CommandPalette),
             },
-            Message::SchemaExplorer(message) => self
-                .schema_explorer
-                .update(message)
-                .map(Message::SchemaExplorer),
+            Message::SchemaExplorer(message) => {
+                let connection_activated = matches!(
+                    message,
+                    SchemaExplorerMessage::ConnectionPalette(PaletteMessage::Activated(_))
+                );
+                let task = self
+                    .schema_explorer
+                    .update(message)
+                    .map(Message::SchemaExplorer);
+                if connection_activated && self.schema_explorer.is_browsing() {
+                    self.open_side_pane(PaneKind::SchemaExplorer);
+                }
+                task
+            }
             Message::OpenSchemaExplorer => self.open_schema_explorer(),
+            Message::ToggleSchemaExplorer => {
+                if matches!(self.side_pane_kind(), Some(PaneKind::SchemaExplorer)) {
+                    self.close_side_pane();
+                    Task::none()
+                } else {
+                    self.open_schema_explorer()
+                }
+            }
             Message::FetchSchema { connection, pool } => Task::perform(
                 async move { db::fetch_schema(&pool).await },
                 move |result| Message::SchemaFetched { connection, result },
@@ -496,8 +516,8 @@ impl App {
                 .update(SchemaExplorerMessage::SchemaLoaded { connection, result })
                 .map(Message::SchemaExplorer),
             Message::Escape => {
-                if self.schema_explorer.is_visible() {
-                    Task::done(Message::SchemaExplorer(SchemaExplorerMessage::Close))
+                if self.schema_explorer.is_picking() {
+                    Task::done(Message::SchemaExplorer(SchemaExplorerMessage::ClosePicker))
                 } else {
                     Task::done(Message::CommandPalette(command_palette::Message::Hide))
                 }
@@ -505,13 +525,33 @@ impl App {
         }
     }
 
-    fn add_agent_chat_pane(&mut self) {
-        if let Some((agent_pane, _split)) = self.panes.split(
-            pane_grid::Axis::Vertical,
-            self.main_pane,
-            PaneKind::AgentChat,
-        ) {
-            self.agent_chat_pane = Some(agent_pane);
+    fn side_pane_kind(&self) -> Option<&PaneKind> {
+        self.side_pane.and_then(|pane| self.panes.get(pane))
+    }
+
+    fn open_side_pane(&mut self, kind: PaneKind) {
+        self.schema_explorer.close_picker();
+        match self.side_pane {
+            Some(pane) => {
+                if let Some(state) = self.panes.get_mut(pane) {
+                    *state = kind;
+                }
+            }
+            None => {
+                if let Some((pane, _split)) =
+                    self.panes
+                        .split(pane_grid::Axis::Vertical, self.main_pane, kind)
+                {
+                    self.side_pane = Some(pane);
+                }
+            }
+        }
+    }
+
+    fn close_side_pane(&mut self) {
+        self.schema_explorer.close_picker();
+        if let Some(pane) = self.side_pane.take() {
+            self.panes.close(pane);
         }
     }
 
@@ -639,7 +679,22 @@ impl App {
             .offset(iced_aw::drop_down::Offset::new(0.0, 20.0))
             .alignment(drop_down::Alignment::TopEnd);
 
-        container(row![horizontal(), dropdown,]).height(25).into()
+        let schema_btn = button(
+            svg(svg::Handle::from_memory(include_bytes!(
+                "resources/table.svg"
+            )))
+            .height(14)
+            .width(14)
+            .style(|_theme, _status| svg::Style {
+                color: Some(Color::WHITE),
+            }),
+        )
+        .on_press(Message::ToggleSchemaExplorer)
+        .style(button::background);
+
+        container(row![horizontal(), schema_btn, dropdown,])
+            .height(25)
+            .into()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -648,7 +703,7 @@ impl App {
             .view_command_palette()
             .or(self.view_connection_manager_dialog())
             .or(self.view_settings_dialog())
-            .or(self.view_schema_explorer());
+            .or(self.view_schema_picker());
 
         let layout = container(column![
             self.view_title_bar(),
@@ -684,6 +739,12 @@ impl App {
                     .unwrap()
                     .view()
                     .map(Message::AgentChat)
+            ]),
+            PaneKind::SchemaExplorer => pane_grid::Content::new(row![
+                rule::vertical(1),
+                self.schema_explorer
+                    .view_pane()
+                    .map(Message::SchemaExplorer)
             ]),
         })
         .width(Length::Fill)
@@ -743,37 +804,21 @@ impl App {
         })
     }
 
-    fn view_schema_explorer(&self) -> Option<Element<'_, Message>> {
-        let dialog = self.schema_explorer.view()?.map(Message::SchemaExplorer);
+    fn view_schema_picker(&self) -> Option<Element<'_, Message>> {
+        let picker = self
+            .schema_explorer
+            .view_picker()?
+            .map(Message::SchemaExplorer);
 
-        if self.schema_explorer.is_selecting_connection() {
-            Some(
-                container(dialog)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_x(iced::Alignment::Center)
-                    .align_y(iced::Alignment::Start)
-                    .padding([100, 0])
-                    .into(),
-            )
-        } else {
-            Some(
-                mouse_area(
-                    container(dialog)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .align_x(iced::Alignment::Center)
-                        .align_y(iced::Alignment::Center)
-                        .style(|_: &Theme| iced::widget::container::Style {
-                            background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.45).into()),
-                            ..Default::default()
-                        }),
-                )
-                .interaction(mouse::Interaction::Idle)
-                .on_press(Message::Noop)
+        Some(
+            container(picker)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Start)
+                .padding([100, 0])
                 .into(),
-            )
-        }
+        )
     }
 
     fn view_configs(&self) -> Element<'_, Message> {

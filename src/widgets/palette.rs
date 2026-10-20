@@ -319,7 +319,9 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
         }
 
         if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event {
-            if let Some(position) = cursor.position() {
+            if let Some(position) = cursor.position()
+                && bounds.contains(position)
+            {
                 let offset = tree.children[SCROLLABLE_CHILD]
                     .state
                     .downcast_ref::<ScrollableState>()
