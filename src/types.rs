@@ -81,11 +81,40 @@ pub struct TableInfo {
     pub columns: Vec<ColumnInfo>,
 }
 
-/// A named PostgreSQL schema and its tables.
+/// Whether a routine is a function or a procedure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutineKind {
+    Function,
+    Procedure,
+}
+
+/// A function or procedure defined in a schema.
+#[derive(Debug, Clone)]
+pub struct RoutineInfo {
+    pub name: String,
+    pub kind: RoutineKind,
+    pub arguments: String,
+    /// `None` for procedures, which have no return type.
+    pub return_type: Option<String>,
+    pub definition: String,
+}
+
+/// An index defined on a table in a schema.
+#[derive(Debug, Clone)]
+pub struct IndexInfo {
+    pub name: String,
+    pub table: String,
+    pub definition: String,
+    pub is_unique: bool,
+}
+
+/// A named PostgreSQL schema and its tables, routines, and indexes.
 #[derive(Debug, Clone)]
 pub struct SchemaInfo {
     pub name: String,
     pub tables: Vec<TableInfo>,
+    pub routines: Vec<RoutineInfo>,
+    pub indexes: Vec<IndexInfo>,
 }
 
 /// The full schema catalog for a single connection/database.

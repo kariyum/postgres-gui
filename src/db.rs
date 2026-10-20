@@ -6,7 +6,8 @@ use sqlx::types::{Decimal, JsonValue, Uuid};
 use sqlx::{Column, Decode, PgPool, Postgres, Row, Type, TypeInfo, ValueRef};
 
 use crate::types::{
-    ColumnInfo, ForeignKeyRef, QueryResult, ResultColumn, ResultRow, SchemaInfo, TableInfo,
+    ColumnInfo, ForeignKeyRef, IndexInfo, QueryResult, ResultColumn, ResultRow, RoutineInfo,
+    RoutineKind, SchemaInfo, TableInfo,
 };
 
 /// Connect to a PostgreSQL database and return a pool.
@@ -284,6 +285,8 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
                 schemas.push(SchemaInfo {
                     name: schema_name.clone(),
                     tables: Vec::new(),
+                    routines: Vec::new(),
+                    indexes: Vec::new(),
                 });
                 schemas.last_mut().unwrap()
             }
@@ -312,5 +315,91 @@ pub async fn fetch_schema(pool: &PgPool) -> Result<Vec<SchemaInfo>, String> {
         });
     }
 
+    let routine_rows = sqlx::query(
+        "SELECT n.nspname::text AS schema_name, p.proname::text AS name, \
+                p.prokind::text AS kind, \
+                pg_get_function_identity_arguments(p.oid) AS arguments, \
+                pg_get_function_result(p.oid) AS return_type, \
+                pg_get_functiondef(p.oid) AS definition \
+         FROM pg_catalog.pg_proc p \
+         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+         WHERE p.prokind IN ('f', 'p') \
+           AND n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
+         ORDER BY n.nspname, p.proname",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for row in &routine_rows {
+        let schema_name: String = row.try_get("schema_name").map_err(|e| e.to_string())?;
+        let name: String = row.try_get("name").map_err(|e| e.to_string())?;
+        let kind: String = row.try_get("kind").map_err(|e| e.to_string())?;
+        let arguments: String = row.try_get("arguments").map_err(|e| e.to_string())?;
+        let return_type: Option<String> =
+            row.try_get("return_type").map_err(|e| e.to_string())?;
+        let definition: String = row.try_get("definition").map_err(|e| e.to_string())?;
+
+        let kind = if kind == "p" {
+            RoutineKind::Procedure
+        } else {
+            RoutineKind::Function
+        };
+        schema_entry(&mut schemas, &schema_name)
+            .routines
+            .push(RoutineInfo {
+                name,
+                kind,
+                arguments,
+                return_type,
+                definition,
+            });
+    }
+
+    let index_rows = sqlx::query(
+        "SELECT schemaname::text AS schema_name, tablename::text AS table_name, \
+                indexname::text AS name, indexdef::text AS definition \
+         FROM pg_catalog.pg_indexes \
+         WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
+         ORDER BY schemaname, tablename, indexname",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for row in &index_rows {
+        let schema_name: String = row.try_get("schema_name").map_err(|e| e.to_string())?;
+        let table: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let name: String = row.try_get("name").map_err(|e| e.to_string())?;
+        let definition: String = row.try_get("definition").map_err(|e| e.to_string())?;
+
+        let is_unique = definition.starts_with("CREATE UNIQUE INDEX");
+        schema_entry(&mut schemas, &schema_name)
+            .indexes
+            .push(IndexInfo {
+                name,
+                table,
+                definition,
+                is_unique,
+            });
+    }
+
+    schemas.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(schemas)
+}
+
+fn schema_entry<'a>(schemas: &'a mut Vec<SchemaInfo>, name: &str) -> &'a mut SchemaInfo {
+    let index = match schemas.iter().position(|s| s.name == name) {
+        Some(index) => index,
+        None => {
+            schemas.push(SchemaInfo {
+                name: name.to_string(),
+                tables: Vec::new(),
+                routines: Vec::new(),
+                indexes: Vec::new(),
+            });
+            schemas.len() - 1
+        }
+    };
+    &mut schemas[index]
 }

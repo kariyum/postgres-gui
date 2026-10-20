@@ -585,9 +585,14 @@ impl App {
             .map(|cfg| cfg.name.clone())
             .collect();
         let tx = self.database_keeper_actor_tx.clone();
-        self.schema_explorer
+        let task = self
+            .schema_explorer
             .open(names, tx)
-            .map(Message::SchemaExplorer)
+            .map(Message::SchemaExplorer);
+        if self.schema_explorer.is_browsing() {
+            self.open_side_pane(PaneKind::SchemaExplorer);
+        }
+        task
     }
 
     fn save_config(&self) -> Task<Message> {

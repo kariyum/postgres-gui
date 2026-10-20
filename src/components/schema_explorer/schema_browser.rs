@@ -5,7 +5,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Color, Element, Length, Task, border};
 
-use crate::types::{ForeignKeyRef, Schema};
+use crate::types::{ForeignKeyRef, RoutineKind, Schema};
 
 const SEARCH_QUERY_INPUT_ID: &str = "search_query_picker_input";
 const LIST_ID: &str = "schema_browser_list";
@@ -77,6 +77,27 @@ impl From<Schema> for DatabaseMetadata {
                     foreign_keys,
                 }));
             }
+
+            for routine in schema_info.routines {
+                schemas.push(Metadata::Routine(RoutineMetadata {
+                    schema: schema_info.name.clone(),
+                    name: routine.name,
+                    kind: routine.kind,
+                    arguments: routine.arguments,
+                    return_type: routine.return_type,
+                    definition: routine.definition,
+                }));
+            }
+
+            for index in schema_info.indexes {
+                schemas.push(Metadata::Index(IndexMetadata {
+                    schema: schema_info.name.clone(),
+                    table: index.table,
+                    name: index.name,
+                    definition: index.definition,
+                    is_unique: index.is_unique,
+                }));
+            }
         }
 
         Self { schemas }
@@ -103,6 +124,27 @@ pub enum Metadata {
     Schema(SchemaMetadata),
     Table(TableMetadata),
     Column(ColumnMetadata),
+    Routine(RoutineMetadata),
+    Index(IndexMetadata),
+}
+
+#[derive(Debug, Clone)]
+pub struct RoutineMetadata {
+    schema: String,
+    name: String,
+    kind: RoutineKind,
+    arguments: String,
+    return_type: Option<String>,
+    definition: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexMetadata {
+    schema: String,
+    table: String,
+    name: String,
+    definition: String,
+    is_unique: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +194,9 @@ pub enum SchemaFilter {
     Schemas,
     Tables,
     Columns,
+    Functions,
+    Procedures,
+    Indexes,
 }
 
 pub fn focus_search<T>() -> Task<T> {
@@ -300,6 +345,9 @@ impl SchemaBrowser {
             SchemaFilter::Schemas,
             SchemaFilter::Tables,
             SchemaFilter::Columns,
+            SchemaFilter::Functions,
+            SchemaFilter::Procedures,
+            SchemaFilter::Indexes,
         ]
         .into_iter()
         .map(|schema_filter| {
@@ -307,6 +355,9 @@ impl SchemaBrowser {
                 SchemaFilter::Schemas => "Schemas",
                 SchemaFilter::Tables => "Tables",
                 SchemaFilter::Columns => "Columns",
+                SchemaFilter::Functions => "Functions",
+                SchemaFilter::Procedures => "Procedures",
+                SchemaFilter::Indexes => "Indexes",
             };
 
             button(text(title).size(12))
@@ -409,6 +460,8 @@ fn view_metadata_row(metadata: &Metadata) -> Element<'_, SchemaBrowserMessage> {
         Metadata::Schema(schema_metadata) => view_schema_metadata(schema_metadata),
         Metadata::Table(table_metadata) => view_table_metadata(table_metadata),
         Metadata::Column(column_metadata) => view_column_metadata(column_metadata),
+        Metadata::Routine(routine_metadata) => view_routine_metadata(routine_metadata),
+        Metadata::Index(index_metadata) => view_index_metadata(index_metadata),
     };
     container(row)
         .height(Length::Fixed(ROW_HEIGHT))
@@ -421,7 +474,86 @@ fn view_metadata_details<'a>(metadata: &'a Metadata) -> Element<'a, SchemaBrowse
         Metadata::Schema(schema_metadata) => text(schema_metadata.name.as_str()).into(),
         Metadata::Table(table_metadata) => view_table_details(table_metadata).into(),
         Metadata::Column(column_metadata) => view_column_details(column_metadata).into(),
+        Metadata::Routine(routine_metadata) => view_routine_details(routine_metadata).into(),
+        Metadata::Index(index_metadata) => view_index_details(index_metadata).into(),
     }
+}
+
+fn view_routine_details<'a>(
+    routine_metadata: &'a RoutineMetadata,
+) -> Element<'a, SchemaBrowserMessage> {
+    let mut rows: Vec<Element<'_, SchemaBrowserMessage>> = vec![
+        detail_row("Kind", routine_kind_label(routine_metadata.kind)),
+        detail_row(
+            "Arguments",
+            if routine_metadata.arguments.is_empty() {
+                "(none)"
+            } else {
+                routine_metadata.arguments.as_str()
+            },
+        ),
+    ];
+    if let Some(return_type) = &routine_metadata.return_type {
+        rows.push(detail_row("Returns", return_type.as_str()));
+    }
+
+    container(
+        scrollable(
+            column![
+                text(routine_metadata.name.as_str()).size(16),
+                text(routine_metadata.schema.as_str())
+                    .size(12)
+                    .style(text::secondary),
+                space::vertical().height(8),
+                Column::from_iter(rows).spacing(4),
+                space::vertical().height(8),
+                section_label("Definition"),
+                text(routine_metadata.definition.as_str()).size(12),
+            ]
+            .spacing(4),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill),
+    )
+    .padding(8)
+    .into()
+}
+
+fn view_index_details<'a>(index_metadata: &'a IndexMetadata) -> Element<'a, SchemaBrowserMessage> {
+    container(
+        scrollable(
+            column![
+                text(index_metadata.name.as_str()).size(16),
+                text(format!(
+                    "{}.{}",
+                    index_metadata.schema, index_metadata.table
+                ))
+                .size(12)
+                .style(text::secondary),
+                space::vertical().height(8),
+                Column::from_iter(vec![
+                    detail_row("Table", index_metadata.table.as_str()),
+                    detail_row(
+                        "Unique",
+                        if index_metadata.is_unique {
+                            "Yes"
+                        } else {
+                            "No"
+                        },
+                    ),
+                ])
+                .spacing(4),
+                space::vertical().height(8),
+                section_label("Definition"),
+                text(index_metadata.definition.as_str()).size(12),
+            ]
+            .spacing(4),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill),
+    )
+    .padding(8)
+    .into()
 }
 
 fn view_column_details<'a>(
@@ -709,6 +841,84 @@ fn view_schema_metadata(schema_metadata: &SchemaMetadata) -> Element<'_, SchemaB
     .into()
 }
 
+fn routine_kind_label(kind: RoutineKind) -> &'static str {
+    match kind {
+        RoutineKind::Function => "Function",
+        RoutineKind::Procedure => "Procedure",
+    }
+}
+
+fn view_routine_metadata(routine_metadata: &RoutineMetadata) -> Element<'_, SchemaBrowserMessage> {
+    let (label, color) = match routine_metadata.kind {
+        RoutineKind::Function => ("fn", Color::from_rgb8(46, 125, 84)),
+        RoutineKind::Procedure => ("proc", Color::from_rgb8(176, 96, 40)),
+    };
+    view_named_row(
+        label,
+        color,
+        routine_metadata.schema.clone(),
+        routine_metadata.name.clone(),
+        Metadata::Routine(routine_metadata.clone()),
+    )
+}
+
+fn view_index_metadata(index_metadata: &IndexMetadata) -> Element<'_, SchemaBrowserMessage> {
+    view_named_row(
+        "idx",
+        Color::from_rgb8(90, 90, 160),
+        format!("{}.{}", index_metadata.schema, index_metadata.table),
+        index_metadata.name.clone(),
+        Metadata::Index(index_metadata.clone()),
+    )
+}
+
+fn view_named_row(
+    label: &'static str,
+    color: Color,
+    qualifier: String,
+    name: String,
+    metadata: Metadata,
+) -> Element<'static, SchemaBrowserMessage> {
+    button(
+        row![
+            container(text(label).size(10))
+                .style(move |_| container::Style {
+                    background: Some(color.into()),
+                    border: iced::Border {
+                        radius: 5.0.into(),
+                        width: 0.0,
+                        color: iced::Color::TRANSPARENT,
+                    },
+                    ..Default::default()
+                })
+                .padding([0, 4]),
+            space::horizontal().width(4),
+            text(qualifier).style(text::secondary).size(12),
+            space::horizontal().width(4),
+            text(name).size(12),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(SchemaBrowserMessage::SelectDetails(metadata))
+    .padding([2, 4])
+    .style(|theme, status| {
+        let background_color = match status {
+            button::Status::Active => Color::TRANSPARENT,
+            _ => theme.palette().background.weak.color,
+        };
+        button::Style {
+            background: Some(background_color.into()),
+            border: iced::Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: border::radius(5.0),
+            },
+            ..button::text(theme, status)
+        }
+    })
+    .into()
+}
+
 fn filter_indices(
     metadata: &DatabaseMetadata,
     search: &str,
@@ -724,6 +934,13 @@ fn filter_indices(
             Some(SchemaFilter::Schemas) => matches!(item, Metadata::Schema(_)),
             Some(SchemaFilter::Tables) => matches!(item, Metadata::Table(_)),
             Some(SchemaFilter::Columns) => matches!(item, Metadata::Column(_)),
+            Some(SchemaFilter::Functions) => {
+                matches!(item, Metadata::Routine(routine) if routine.kind == RoutineKind::Function)
+            }
+            Some(SchemaFilter::Procedures) => {
+                matches!(item, Metadata::Routine(routine) if routine.kind == RoutineKind::Procedure)
+            }
+            Some(SchemaFilter::Indexes) => matches!(item, Metadata::Index(_)),
         })
         .filter(|(_, item)| needle.is_empty() || matches_search(item, &needle))
         .map(|(index, _)| index)
@@ -740,6 +957,12 @@ fn matches_search(metadata: &Metadata, needle: &str) -> bool {
         Metadata::Column(column) => {
             contains(&column.name)
                 || contains(&format!("{}.{}", column.schema_name, column.table_name))
+        }
+        Metadata::Routine(routine) => {
+            contains(&routine.name) || contains(&format!("{}.{}", routine.schema, routine.name))
+        }
+        Metadata::Index(index) => {
+            contains(&index.name) || contains(&format!("{}.{}", index.schema, index.table))
         }
     }
 }
