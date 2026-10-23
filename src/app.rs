@@ -147,11 +147,9 @@ impl App {
                     Task::none()
                 }
             }
-            Message::Editor(editor::Message::NewRequested) => {
-                Task::done(Message::CommandPalette(
-                    command_palette::Message::ShowConnections(self.app_config.connections.clone()),
-                ))
-            }
+            Message::Editor(editor::Message::NewRequested) => Task::done(Message::CommandPalette(
+                command_palette::Message::ShowConnections(self.app_config.connections.clone()),
+            )),
             Message::Editor(msg) => self.editor.update(msg).map(Message::Editor),
             Message::AddConnection => Task::done(Message::CloseMenu)
                 .chain(Task::done(Message::DialogMessage(DialogMessage::OpenNew))),
@@ -489,7 +487,7 @@ impl App {
                     self.close_side_pane();
                     Task::none()
                 } else {
-                    self.open_schema_explorer()
+                    Task::done(Message::OpenSchemaExplorer)
                 }
             }
             Message::FetchSchema { connection, pool } => Task::perform(

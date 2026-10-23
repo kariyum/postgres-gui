@@ -83,6 +83,10 @@ impl CommandList {
                     None => Task::none(),
                 }
             }
+            Message::Palette(PaletteMessage::Close) => {
+                tracing::info!("Got clone here...");
+                Task::none()
+            }
             Message::Run(_) => Task::none(),
         }
     }

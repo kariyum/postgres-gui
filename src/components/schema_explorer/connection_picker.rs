@@ -30,6 +30,7 @@ impl ConnectionPicker {
                 None
             }
             PaletteMessage::Activated(index) => self.filtered.get(index).cloned(),
+            PaletteMessage::Close => None,
         }
     }
 

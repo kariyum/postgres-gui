@@ -93,6 +93,10 @@ impl SchemaExplorer {
 
     pub fn update(&mut self, message: SchemaExplorerMessage) -> Task<SchemaExplorerMessage> {
         match message {
+            SchemaExplorerMessage::ConnectionPalette(PaletteMessage::Close) => {
+                self.close_picker();
+                Task::none()
+            }
             SchemaExplorerMessage::ConnectionPalette(message) => {
                 let selected = self
                     .picker

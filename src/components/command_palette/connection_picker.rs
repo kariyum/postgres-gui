@@ -62,6 +62,7 @@ impl ConnectionPicker {
                     None => Task::none(),
                 }
             }
+            Message::Palette(PaletteMessage::Close) => Task::none(),
             Message::Selected(_) => Task::none(),
         }
     }

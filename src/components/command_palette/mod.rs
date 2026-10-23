@@ -5,6 +5,7 @@ use iced::widget::{Id, operation};
 use iced::{Element, Task};
 
 use crate::components::connection_config::ConnectionConfig;
+use crate::widgets::palette;
 use command_list::{CommandAction, CommandList};
 use connection_picker::ConnectionPicker;
 
@@ -75,6 +76,12 @@ impl CommandPalette {
                 operation::focus(Id::new(connection_picker::INPUT_ID))
             }
             Message::CommandList(command_list::Message::Run(action)) => self.run_command(action),
+            Message::CommandList(command_list::Message::Palette(
+                palette::PaletteMessage::Close,
+            )) => {
+                self.hide();
+                Task::none()
+            }
             Message::CommandList(message) => match &mut self.stage {
                 Stage::Commands(list) => list.update(message).map(Message::CommandList),
                 Stage::Connections(_) => Task::none(),
@@ -82,6 +89,12 @@ impl CommandPalette {
             Message::ConnectionPicker(connection_picker::Message::Selected(connection)) => {
                 self.hide();
                 Task::done(Message::Event(Event::ConnectionSelected(connection)))
+            }
+            Message::ConnectionPicker(connection_picker::Message::Palette(
+                palette::PaletteMessage::Close,
+            )) => {
+                self.hide();
+                Task::none()
             }
             Message::ConnectionPicker(message) => match &mut self.stage {
                 Stage::Connections(picker) => picker.update(message).map(Message::ConnectionPicker),

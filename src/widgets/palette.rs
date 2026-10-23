@@ -37,6 +37,7 @@ pub enum PaletteMessage {
     InputChanged(String),
     /// The item at `index` was activated (Enter key or mouse click).
     Activated(usize),
+    Close,
 }
 
 /// A reusable, self-contained command palette: a search input over a scrollable
@@ -334,6 +335,14 @@ impl Widget<PaletteMessage, Theme, iced::Renderer> for Palette<'_> {
                         shell.request_redraw();
                     }
                 }
+            }
+        }
+
+        if let Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
+            if let Some(position) = cursor.position()
+                && !bounds.contains(position)
+            {
+                shell.publish(PaletteMessage::Close);
             }
         }
 
