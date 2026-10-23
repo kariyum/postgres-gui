@@ -1,9 +1,12 @@
 use iced::{
     Element, Length, Task,
-    widget::{self, Row, button, column, container, row, scrollable, space, text},
+    widget::{self, Row, button, column, container, operation, row, scrollable, space, text},
 };
 
-use crate::components::editor_config::{self, EditorConfig, EditorId};
+use crate::components::{
+    editor::Message::EditorConfigMessage,
+    editor_config::{self, EditorConfig, EditorId},
+};
 
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -118,9 +121,9 @@ impl Editor {
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
             Message::Add(editor_config) => {
-                self.focused = Some(editor_config.id());
+                let id = (&editor_config).id();
                 self.windows.push(editor_config);
-                Task::none()
+                self.focus_editor(id)
             }
             Message::Close(id) => {
                 if let Some(idx) = self.index_of(id) {
@@ -138,9 +141,10 @@ impl Editor {
             }
             Message::Focus(id) => {
                 if self.index_of(id).is_some() {
-                    self.focused = Some(id);
+                    self.focus_editor(id)
+                } else {
+                    Task::none()
                 }
-                Task::none()
             }
             Message::NewRequested => Task::none(),
             Message::EditorConfigMessage(id, msg) => match msg {
@@ -157,5 +161,10 @@ impl Editor {
                 }
             },
         }
+    }
+
+    fn focus_editor(&mut self, editor_id: EditorId) -> Task<Message> {
+        self.focused = Some(editor_id);
+        operation::focus(editor_id.id())
     }
 }

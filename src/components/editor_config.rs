@@ -8,6 +8,7 @@ use crate::{components::connection_config::ConnectionConfig, widgets};
 use anyhow::Context;
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
+use iced::widget::operation;
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
@@ -19,6 +20,12 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EditorId(Uuid);
+
+impl EditorId {
+    pub fn id(&self) -> String {
+        self.0.to_string()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct EditorConfig {
@@ -270,6 +277,7 @@ impl EditorConfig {
                 .height(Length::FillPortion(1))
                 .font(iced::Font::MONOSPACE)
                 .size(14)
+                .id(self.id.0.to_string())
                 .style(|_theme, _status| text_editor::Style {
                     background: Background::Color(Color::TRANSPARENT),
                     border: iced::Border {
@@ -328,5 +336,9 @@ impl EditorConfig {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+
+    pub fn focus(&self) -> Task<Message> {
+        operation::focus(self.id().0.to_string())
     }
 }
