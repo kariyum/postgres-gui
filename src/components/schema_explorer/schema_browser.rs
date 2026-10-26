@@ -5,7 +5,9 @@ use iced::widget::{
 };
 use iced::{Alignment, Color, Element, Length, Task, border};
 
-use crate::types::{ConstraintInfo, ConstraintKind, ForeignKeyRef, RoutineKind, Schema};
+use crate::types::{
+    ConstraintInfo, ConstraintKind, ForeignKeyRef, RoutineKind, Schema, SchemaInfo,
+};
 
 const SEARCH_QUERY_INPUT_ID: &str = "search_query_picker_input";
 const LIST_ID: &str = "schema_browser_list";
@@ -47,6 +49,7 @@ impl From<Schema> for DatabaseMetadata {
                         is_primary_key: column.is_primary_key,
                         is_foreign_key: column.is_foreign_key,
                         references: column.references.clone(),
+                        show_column_details: false,
                     })
                     .collect();
 
@@ -141,6 +144,7 @@ pub struct ColumnMetadata {
     is_primary_key: bool,
     is_foreign_key: bool,
     references: Option<ForeignKeyRef>,
+    show_column_details: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +168,11 @@ pub enum SchemaBrowserMessage {
     SchemaFilter(SchemaFilter),
     SelectDetails(Metadata),
     Scrolled(f32),
+    ExpandColumn {
+        schema_name: String,
+        table_name: String,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,6 +261,29 @@ impl SchemaBrowser {
             }
             SchemaBrowserMessage::Scrolled(offset) => {
                 self.scroll_offset = offset;
+                Task::none()
+            }
+            SchemaBrowserMessage::ExpandColumn {
+                schema_name,
+                table_name,
+                name,
+            } => {
+                // The details pane renders `selected_metadata`, which holds its own copy of
+                // the table, so toggle it there as well as in the list entry.
+                let tables = self
+                    .metadata
+                    .schemas
+                    .iter_mut()
+                    .chain(self.selected_metadata.as_mut());
+                for metadata in tables {
+                    if let Metadata::Table(table) = metadata
+                        && table.schema == schema_name
+                        && table.name == table_name
+                        && let Some(column) = table.columns.iter_mut().find(|c| c.name == name)
+                    {
+                        column.show_column_details = !column.show_column_details;
+                    }
+                }
                 Task::none()
             }
         }
@@ -604,6 +636,48 @@ fn view_column_details<'a>(
     .into()
 }
 
+fn view_table_column_details<'a>(
+    column_metadata: &'a ColumnMetadata,
+) -> Element<'a, SchemaBrowserMessage> {
+    let default_text = column_metadata
+        .column_default
+        .as_deref()
+        .map(|default_text| detail_row("Default", default_text));
+
+    let mut rows: Vec<Element<'_, SchemaBrowserMessage>> = vec![
+        text(if column_metadata.nullable {
+            "nullable"
+        } else {
+            "not nullable"
+        })
+        .size(12)
+        .style(text::secondary)
+        .into(),
+    ];
+
+    if let Some(default_text) = default_text {
+        rows.push(default_text);
+    }
+
+    if let Some(reference) = &column_metadata.references {
+        rows.push(detail_row(
+            "Foreign key",
+            format!(
+                "{}.{}.{}",
+                reference.schema, reference.table, reference.column
+            ),
+        ));
+    }
+
+    if let Some(length) = column_metadata.character_maximum_length {
+        rows.push(detail_row("Max length", length.to_string()));
+    }
+
+    container(Column::from_iter(rows).spacing(4))
+        .padding(0)
+        .into()
+}
+
 fn view_table_details<'a>(table_metadata: &'a TableMetadata) -> Element<'a, SchemaBrowserMessage> {
     let mut columns: Vec<Element<'_, SchemaBrowserMessage>> = vec![section_label("Columns")];
     columns.extend(table_metadata.columns.iter().map(view_table_column_row));
@@ -615,20 +689,17 @@ fn view_table_details<'a>(table_metadata: &'a TableMetadata) -> Element<'a, Sche
     }
     constraints.extend(table_metadata.constraints.iter().map(view_constraint_row));
 
-    let column_details = table_metadata.columns.iter().map(view_column_details);
-
     container(
-        scrollable(
+        scrollable(row![
             column![
                 text(format!("{}.{}", table_metadata.schema, table_metadata.name)).size(16),
                 space::vertical().height(8),
                 Column::from_iter(columns).spacing(3),
                 space::vertical().height(12),
                 Column::from_iter(constraints).spacing(3),
-                Column::from_iter(column_details).spacing(3)
             ]
-            .spacing(4),
-        )
+            .spacing(4)
+        ])
         .height(Length::Fill)
         .width(Length::Fill),
     )
@@ -669,16 +740,32 @@ fn view_table_column_row(column: &ColumnMetadata) -> Element<'_, SchemaBrowserMe
         badges.push(key_badge("FK", Color::from_rgb8(54, 156, 140)));
     }
 
-    row![
-        text(column.name.as_str()).size(12),
-        space::horizontal().width(6),
-        text(column.data_type.as_str())
-            .size(12)
-            .style(text::secondary),
+    let column_details = if column.show_column_details {
+        view_table_column_details(column)
+    } else {
+        space().into()
+    };
+
+    column![
+        row![
+            button(text(column.name.as_str()).size(12))
+                .on_press(SchemaBrowserMessage::ExpandColumn {
+                    schema_name: column.schema_name.clone(),
+                    table_name: column.table_name.clone(),
+                    name: column.name.clone(),
+                })
+                .style(button::text)
+                .padding(0),
+            space::horizontal().width(6),
+            text(column.data_type.as_str())
+                .size(12)
+                .style(text::secondary),
+        ]
+        .extend(badges)
+        .spacing(4)
+        .align_y(Alignment::Center),
+        row![space::horizontal().width(20), column_details]
     ]
-    .extend(badges)
-    .spacing(4)
-    .align_y(Alignment::Center)
     .into()
 }
 
