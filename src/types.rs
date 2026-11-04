@@ -127,11 +127,20 @@ pub struct IndexInfo {
     pub is_unique: bool,
 }
 
-/// A named PostgreSQL schema and its tables, routines, and indexes.
+/// A view or materialized view defined in a schema.
+#[derive(Debug, Clone)]
+pub struct ViewInfo {
+    pub name: String,
+    pub is_materialized: bool,
+    pub definition: String,
+}
+
+/// A named PostgreSQL schema and its tables, views, routines, and indexes.
 #[derive(Debug, Clone)]
 pub struct SchemaInfo {
     pub name: String,
     pub tables: Vec<TableInfo>,
+    pub views: Vec<ViewInfo>,
     pub routines: Vec<RoutineInfo>,
     pub indexes: Vec<IndexInfo>,
 }

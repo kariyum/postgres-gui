@@ -65,6 +65,15 @@ impl From<Schema> for DatabaseMetadata {
                 }));
             }
 
+            for view in schema_info.views {
+                schemas.push(Metadata::View(ViewMetadata {
+                    schema: schema_info.name.clone(),
+                    name: view.name,
+                    is_materialized: view.is_materialized,
+                    definition: view.definition,
+                }));
+            }
+
             for routine in schema_info.routines {
                 schemas.push(Metadata::Routine(RoutineMetadata {
                     schema: schema_info.name.clone(),
@@ -104,8 +113,17 @@ pub enum Metadata {
     Schema(SchemaMetadata),
     Table(TableMetadata),
     Column(ColumnMetadata),
+    View(ViewMetadata),
     Routine(RoutineMetadata),
     Index(IndexMetadata),
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewMetadata {
+    schema: String,
+    name: String,
+    is_materialized: bool,
+    definition: String,
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +198,7 @@ pub enum SchemaFilter {
     Schemas,
     Tables,
     Columns,
+    Views,
     Functions,
     Procedures,
     Indexes,
@@ -364,6 +383,7 @@ impl SchemaBrowser {
             SchemaFilter::Schemas,
             SchemaFilter::Tables,
             SchemaFilter::Columns,
+            SchemaFilter::Views,
             SchemaFilter::Functions,
             SchemaFilter::Procedures,
             SchemaFilter::Indexes,
@@ -374,6 +394,7 @@ impl SchemaBrowser {
                 SchemaFilter::Schemas => "Schemas",
                 SchemaFilter::Tables => "Tables",
                 SchemaFilter::Columns => "Columns",
+                SchemaFilter::Views => "Views",
                 SchemaFilter::Functions => "Functions",
                 SchemaFilter::Procedures => "Procedures",
                 SchemaFilter::Indexes => "Indexes",
@@ -479,6 +500,7 @@ fn view_metadata_row(metadata: &Metadata) -> Element<'_, SchemaBrowserMessage> {
         Metadata::Schema(schema_metadata) => view_schema_metadata(schema_metadata),
         Metadata::Table(table_metadata) => view_table_metadata(table_metadata),
         Metadata::Column(column_metadata) => view_column_metadata(column_metadata),
+        Metadata::View(view_metadata) => view_view_metadata(view_metadata),
         Metadata::Routine(routine_metadata) => view_routine_metadata(routine_metadata),
         Metadata::Index(index_metadata) => view_index_metadata(index_metadata),
     };
@@ -493,9 +515,41 @@ fn view_metadata_details<'a>(metadata: &'a Metadata) -> Element<'a, SchemaBrowse
         Metadata::Schema(schema_metadata) => text(schema_metadata.name.as_str()).into(),
         Metadata::Table(table_metadata) => view_table_details(table_metadata).into(),
         Metadata::Column(column_metadata) => view_column_details(column_metadata).into(),
+        Metadata::View(view_metadata) => view_view_details(view_metadata).into(),
         Metadata::Routine(routine_metadata) => view_routine_details(routine_metadata).into(),
         Metadata::Index(index_metadata) => view_index_details(index_metadata).into(),
     }
+}
+
+fn view_view_details<'a>(view_metadata: &'a ViewMetadata) -> Element<'a, SchemaBrowserMessage> {
+    container(
+        scrollable(
+            column![
+                text(view_metadata.name.as_str()).size(16),
+                text(view_metadata.schema.as_str())
+                    .size(12)
+                    .style(text::secondary),
+                space::vertical().height(8),
+                Column::from_iter(vec![detail_row(
+                    "Kind",
+                    if view_metadata.is_materialized {
+                        "Materialized view"
+                    } else {
+                        "View"
+                    },
+                )])
+                .spacing(4),
+                space::vertical().height(8),
+                section_label("Definition"),
+                text(view_metadata.definition.as_str()).size(12),
+            ]
+            .spacing(4),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill),
+    )
+    .padding(8)
+    .into()
 }
 
 fn view_routine_details<'a>(
@@ -642,7 +696,7 @@ fn view_table_column_details<'a>(
     let default_text = column_metadata
         .column_default
         .as_deref()
-        .map(|default_text| detail_row("Default", default_text));
+        .map(|default_text| detail_row("default", default_text));
 
     let mut rows: Vec<Element<'_, SchemaBrowserMessage>> = vec![
         text(if column_metadata.nullable {
@@ -661,7 +715,7 @@ fn view_table_column_details<'a>(
 
     if let Some(reference) = &column_metadata.references {
         rows.push(detail_row(
-            "Foreign key",
+            "foreign key",
             format!(
                 "{}.{}.{}",
                 reference.schema, reference.table, reference.column
@@ -670,10 +724,10 @@ fn view_table_column_details<'a>(
     }
 
     if let Some(length) = column_metadata.character_maximum_length {
-        rows.push(detail_row("Max length", length.to_string()));
+        rows.push(detail_row("max length", length.to_string()));
     }
 
-    container(Column::from_iter(rows).spacing(4))
+    container(Column::from_iter(rows).spacing(0))
         .padding(0)
         .into()
 }
@@ -931,6 +985,21 @@ fn routine_kind_label(kind: RoutineKind) -> &'static str {
     }
 }
 
+fn view_view_metadata(view_metadata: &ViewMetadata) -> Element<'_, SchemaBrowserMessage> {
+    let (label, color) = if view_metadata.is_materialized {
+        ("mview", Color::from_rgb8(40, 110, 140))
+    } else {
+        ("view", Color::from_rgb8(120, 80, 160))
+    };
+    view_named_row(
+        label,
+        color,
+        view_metadata.schema.clone(),
+        view_metadata.name.clone(),
+        Metadata::View(view_metadata.clone()),
+    )
+}
+
 fn view_routine_metadata(routine_metadata: &RoutineMetadata) -> Element<'_, SchemaBrowserMessage> {
     let (label, color) = match routine_metadata.kind {
         RoutineKind::Function => ("fn", Color::from_rgb8(46, 125, 84)),
@@ -1017,6 +1086,7 @@ fn filter_indices(
             Some(SchemaFilter::Schemas) => matches!(item, Metadata::Schema(_)),
             Some(SchemaFilter::Tables) => matches!(item, Metadata::Table(_)),
             Some(SchemaFilter::Columns) => matches!(item, Metadata::Column(_)),
+            Some(SchemaFilter::Views) => matches!(item, Metadata::View(_)),
             Some(SchemaFilter::Functions) => {
                 matches!(item, Metadata::Routine(routine) if routine.kind == RoutineKind::Function)
             }
@@ -1040,6 +1110,9 @@ fn matches_search(metadata: &Metadata, needle: &str) -> bool {
         Metadata::Column(column) => {
             contains(&column.name)
                 || contains(&format!("{}.{}", column.schema_name, column.table_name))
+        }
+        Metadata::View(view) => {
+            contains(&view.name) || contains(&format!("{}.{}", view.schema, view.name))
         }
         Metadata::Routine(routine) => {
             contains(&routine.name) || contains(&format!("{}.{}", routine.schema, routine.name))
