@@ -275,6 +275,19 @@ impl SchemaBrowser {
                 self.reset_scroll()
             }
             SchemaBrowserMessage::SelectDetails(metadata) => {
+                let metadata = match metadata {
+                    Metadata::Column(column) => self
+                        .metadata
+                        .schemas
+                        .iter()
+                        .find(|m| {
+                            matches!(m, Metadata::Table(t)
+                                if t.schema == column.schema_name && t.name == column.table_name)
+                        })
+                        .cloned()
+                        .unwrap_or(Metadata::Column(column)),
+                    other => other,
+                };
                 self.selected_metadata = Some(metadata);
                 Task::none()
             }
