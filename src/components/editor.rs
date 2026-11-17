@@ -20,6 +20,7 @@ pub enum Message {
     Close(EditorId),
     Focus(EditorId),
     NewRequested,
+    RunQuery,
     EditorConfigMessage(EditorId, editor_config::Message),
 }
 
@@ -150,6 +151,19 @@ impl Editor {
                 }
             }
             Message::NewRequested => Task::none(),
+            Message::RunQuery => {
+                if let Some(window) = self.focused_window() {
+                    let id = window.id();
+                    Task::done(Message::EditorConfigMessage(
+                        id,
+                        editor_config::Message::ToolbarActions(
+                            editor_config::ToolbarActions::RunQuery,
+                        ),
+                    ))
+                } else {
+                    Task::none()
+                }
+            }
             Message::EditorConfigMessage(id, msg) => match msg {
                 editor_config::Message::Select => Task::done(Message::Focus(id)),
                 editor_config::Message::Close => Task::done(Message::Close(id)),

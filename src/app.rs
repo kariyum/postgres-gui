@@ -987,6 +987,10 @@ impl App {
                     {
                         Some(Message::CommandPalette(command_palette::Message::Toggle))
                     }
+                    (
+                        iced::keyboard::Modifiers::CTRL,
+                        iced::keyboard::Key::Named(Named::Enter),
+                    ) => Some(Message::Editor(editor::Message::RunQuery)),
                     (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
                     _ => None,
                 }
