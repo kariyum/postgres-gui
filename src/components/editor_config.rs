@@ -8,7 +8,8 @@ use crate::{components::connection_config::ConnectionConfig, widgets};
 use anyhow::Context;
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
-use iced::widget::operation;
+use iced::{Alignment, padding};
+use iced::widget::{operation, space};
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
@@ -247,26 +248,23 @@ impl EditorConfig {
 
     fn view_toolbar(&self) -> Element<'_, Message> {
         let run_btn = button(
-            svg(svg::Handle::from_memory(include_bytes!(
-                "../resources/play.svg"
-            )))
-            .height(12)
-            .width(12),
-        )
-        .on_press(Message::ToolbarActions(ToolbarActions::RunQuery));
-
-        container(
             row![
-                run_btn,
-                iced::widget::Space::new().width(Length::Fill),
-                text(self.connection_string())
-                    .size(11)
-                    .style(text::secondary),
+                svg(svg::Handle::from_memory(include_bytes!(
+                    "../resources/play.svg"
+                )))
+                .height(12)
+                .width(12),
+                text("Run").size(12)
             ]
-            .align_y(iced::Alignment::Center),
+            .spacing(12)
+            .align_y(Alignment::Center),
         )
-        .padding([6, 4])
-        .into()
+        .on_press(Message::ToolbarActions(ToolbarActions::RunQuery))
+        .style(button::subtle);
+
+        container(row![run_btn,].align_y(iced::Alignment::Center))
+            .padding([6, 4])
+            .into()
     }
 
     fn view_query_editor(&self) -> Element<'_, Message> {

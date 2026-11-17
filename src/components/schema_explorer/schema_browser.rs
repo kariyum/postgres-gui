@@ -364,7 +364,7 @@ impl SchemaBrowser {
                     .width(Length::FillPortion(1)),
                 rule::vertical(1),
                 container(self.view_details(selected_metadata))
-                    .padding([0, 8])
+                    .padding([0, 4])
                     .height(Length::Fill)
                     .width(Length::FillPortion(1)),
             ]
