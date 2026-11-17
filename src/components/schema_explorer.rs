@@ -10,7 +10,8 @@ mod connection_picker;
 mod schema_browser;
 
 use connection_picker::ConnectionPicker;
-use schema_browser::{SchemaBrowser, SchemaBrowserMessage};
+use schema_browser::SchemaBrowser;
+pub use schema_browser::SchemaBrowserMessage;
 
 #[derive(Debug, Clone)]
 pub struct SchemaExplorer {

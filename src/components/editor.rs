@@ -163,6 +163,14 @@ impl Editor {
         }
     }
 
+    /// Replaces the query text of the focused editor. Returns `None` if no editor is open.
+    pub fn write_query(&mut self, query: &str) -> Option<Task<Message>> {
+        let id = self.focused_window()?.id();
+        let idx = self.index_of(id)?;
+        self.windows[idx].set_query(query);
+        Some(self.focus_editor(id))
+    }
+
     fn focus_editor(&mut self, editor_id: EditorId) -> Task<Message> {
         self.focused = Some(editor_id);
         operation::focus(editor_id.id())

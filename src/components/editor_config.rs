@@ -172,6 +172,12 @@ impl EditorConfig {
         }
     }
 
+    pub fn set_query(&mut self, query: &str) {
+        self.editor = text_editor::Content::with_text(query);
+        self.editor
+            .perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+    }
+
     pub fn id(&self) -> EditorId {
         self.id
     }

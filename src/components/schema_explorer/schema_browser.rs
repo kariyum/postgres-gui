@@ -185,6 +185,12 @@ pub enum SchemaBrowserMessage {
     SearchChanged(String),
     SchemaFilter(SchemaFilter),
     SelectDetails(Metadata),
+    /// Handled by the app: writes a `SELECT *` for the table into the focused editor.
+    SelectAllFrom {
+        schema: String,
+        table: String,
+        columns: Vec<String>,
+    },
     Scrolled(f32),
     ExpandColumn {
         schema_name: String,
@@ -291,6 +297,7 @@ impl SchemaBrowser {
                 self.selected_metadata = Some(metadata);
                 Task::none()
             }
+            SchemaBrowserMessage::SelectAllFrom { .. } => Task::none(),
             SchemaBrowserMessage::Scrolled(offset) => {
                 self.scroll_offset = offset;
                 Task::none()
@@ -759,7 +766,23 @@ fn view_table_details<'a>(table_metadata: &'a TableMetadata) -> Element<'a, Sche
     container(
         scrollable(row![
             column![
-                text(format!("{}.{}", table_metadata.schema, table_metadata.name)).size(16),
+                row![
+                    text(format!("{}.{}", table_metadata.schema, table_metadata.name)).size(16),
+                    space::horizontal(),
+                    button(text("SELECT *").size(12))
+                        .on_press(SchemaBrowserMessage::SelectAllFrom {
+                            schema: table_metadata.schema.clone(),
+                            table: table_metadata.name.clone(),
+                            columns: table_metadata
+                                .columns
+                                .iter()
+                                .map(|c| c.name.clone())
+                                .collect(),
+                        })
+                        .padding([2, 8])
+                        .style(button::secondary),
+                ]
+                .align_y(Alignment::Center),
                 space::vertical().height(8),
                 Column::from_iter(columns).spacing(3),
                 space::vertical().height(12),

@@ -21,7 +21,9 @@ use crate::components::connection_dialog::{self, ConnectionDialog, DialogMessage
 use crate::components::editor::{self, Editor};
 use crate::components::editor_config::EditorConfig;
 use crate::components::provider_config::ProviderConfigMessage;
-use crate::components::schema_explorer::{SchemaExplorer, SchemaExplorerMessage};
+use crate::components::schema_explorer::{
+    SchemaBrowserMessage, SchemaExplorer, SchemaExplorerMessage,
+};
 use crate::components::settings_dialog::{SettingsDialog, SettingsMessage};
 use crate::core::agent_config::AgentConfig;
 use crate::core::agent_tools::DatabaseKeeperMessage;
@@ -467,6 +469,24 @@ impl App {
                     .update(message)
                     .map(Message::CommandPalette),
             },
+            Message::SchemaExplorer(SchemaExplorerMessage::Browser(
+                SchemaBrowserMessage::SelectAllFrom {
+                    schema,
+                    table,
+                    columns,
+                },
+            )) => {
+                let query = format!(
+                    "SELECT\n    {}\nFROM {}.{};",
+                    columns.join(",\n    "),
+                    schema,
+                    table
+                );
+                match self.editor.write_query(&query) {
+                    Some(task) => task.map(Message::Editor),
+                    None => Task::none(),
+                }
+            }
             Message::SchemaExplorer(message) => {
                 let connection_activated = matches!(
                     message,
