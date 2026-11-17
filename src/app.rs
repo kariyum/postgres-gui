@@ -534,10 +534,14 @@ impl App {
                     Task::none()
                 }
             }
-            Message::SchemaLoaded { connection, result } => self
-                .schema_explorer
-                .update(SchemaExplorerMessage::SchemaLoaded { connection, result })
-                .map(Message::SchemaExplorer),
+            Message::SchemaLoaded { connection, result } => {
+                if let Ok(schema) = &result {
+                    self.editor.set_schema(&connection, schema);
+                }
+                self.schema_explorer
+                    .update(SchemaExplorerMessage::SchemaLoaded { connection, result })
+                    .map(Message::SchemaExplorer)
+            }
             Message::Escape => {
                 if self.schema_explorer.is_picking() {
                     Task::done(Message::SchemaExplorer(SchemaExplorerMessage::ClosePicker))

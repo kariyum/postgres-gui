@@ -122,8 +122,11 @@ impl Editor {
         match msg {
             Message::Add(editor_config) => {
                 let id = (&editor_config).id();
+                let load_schema = editor_config
+                    .load_schema()
+                    .map(move |msg| Message::EditorConfigMessage(id, msg));
                 self.windows.push(editor_config);
-                self.focus_editor(id)
+                Task::batch([self.focus_editor(id), load_schema])
             }
             Message::Close(id) => {
                 if let Some(idx) = self.index_of(id) {
@@ -160,6 +163,14 @@ impl Editor {
                     }
                 }
             },
+        }
+    }
+
+    /// Shares a freshly loaded schema with every editor of that connection.
+    pub fn set_schema(&mut self, connection: &str, schema: &crate::types::Schema) {
+        let schema = std::sync::Arc::new(schema.clone());
+        for window in &mut self.windows {
+            window.set_schema(connection, schema.clone());
         }
     }
 

@@ -2,7 +2,7 @@ use std::{rc::Rc, sync::Arc};
 
 use crate::core::agent_tools::{DatabaseKeeperMessage, ToolError};
 use crate::db;
-use crate::types::QueryResult;
+use crate::types::{QueryResult, Schema};
 use crate::{components::connection_config::ConnectionConfig, widgets};
 
 use anyhow::Context;
@@ -33,7 +33,8 @@ pub struct EditorConfig {
     id: EditorId,
     config: ConnectionConfig,
     database: String,
-    editor: text_editor::Content,
+    editor: widgets::sql_editor::Content,
+    schema: Option<Arc<Schema>>,
     panes: pane_grid::State<PaneKind>,
     editor_pane: pane_grid::Pane,
     table_pane: Option<pane_grid::Pane>,
@@ -53,7 +54,9 @@ enum PaneKind {
 pub enum Message {
     Select,
     Close,
-    EditorAction(text_editor::Action),
+    EditorAction(widgets::sql_editor::Action),
+    SchemaReady(Arc<Schema>),
+    Noop,
     ToolbarActions(ToolbarActions),
     Resized(pane_grid::ResizeEvent),
     QueryCompleted {
@@ -77,7 +80,8 @@ impl EditorConfig {
             id: EditorId(Uuid::new_v4()),
             database: connection_config.database.clone(),
             config: connection_config,
-            editor: text_editor::Content::new(),
+            editor: widgets::sql_editor::Content::new(),
+            schema: None,
             panes: pane,
             editor_pane,
             database_keeper: tx,
@@ -93,9 +97,14 @@ impl EditorConfig {
             Message::Select => Task::none(),
             Message::Close => Task::none(),
             Message::EditorAction(action) => {
-                self.editor.perform(action);
+                self.apply_editor_action(action);
                 Task::none()
             }
+            Message::SchemaReady(schema) => {
+                self.schema = Some(schema);
+                Task::none()
+            }
+            Message::Noop => Task::none(),
             Message::ToolbarActions(toolbar_actions) => {
                 tracing::info!("Got toolbar action {:?}", toolbar_actions);
                 self.perform_toolbar_action(toolbar_actions)
@@ -173,13 +182,85 @@ impl EditorConfig {
     }
 
     pub fn set_query(&mut self, query: &str) {
-        self.editor = text_editor::Content::with_text(query);
-        self.editor
-            .perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+        self.editor = widgets::sql_editor::Content::with_text(query);
+        self.editor.perform(widgets::sql_editor::Action::Move {
+            motion: widgets::sql_editor::Motion::DocumentEnd,
+            select: false,
+        });
     }
 
     pub fn id(&self) -> EditorId {
         self.id
+    }
+
+    /// Applies an editor action, then opens/updates/closes the suggestion popup.
+    fn apply_editor_action(&mut self, action: widgets::sql_editor::Action) {
+        use widgets::sql_editor::Action as A;
+
+        enum Popup {
+            Keep,
+            Dismiss,
+            Refresh { force: bool },
+        }
+
+        let popup = match &action {
+            A::Type(text) => {
+                if text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+                    Popup::Refresh { force: false }
+                } else {
+                    Popup::Dismiss
+                }
+            }
+            A::Backspace | A::DeleteWord { .. } => {
+                if self.editor.completion().is_some() {
+                    Popup::Refresh { force: false }
+                } else {
+                    Popup::Keep
+                }
+            }
+            A::RequestCompletion => Popup::Refresh { force: true },
+            A::CompletionMove(_)
+            | A::CompletionAccept
+            | A::CompletionPick(_)
+            | A::CompletionDismiss => Popup::Keep,
+            _ => Popup::Dismiss,
+        };
+
+        self.editor.perform(action);
+
+        match popup {
+            Popup::Keep => {}
+            Popup::Dismiss => self.editor.set_completion(None),
+            Popup::Refresh { force } => {
+                let completion =
+                    crate::core::sql_completion::suggest(self.schema.as_deref(), &self.editor, force);
+                self.editor.set_completion(completion);
+            }
+        }
+    }
+
+    /// Fetches the schema used for suggestions (connects if needed).
+    pub fn load_schema(&self) -> Task<Message> {
+        let mut keeper = self.database_keeper.clone();
+        let name = self.config.name.clone();
+        Task::perform(
+            async move {
+                crate::core::database_keeper::get_schema(&mut keeper, &name)
+                    .await
+                    .ok()
+            },
+            |schema| match schema {
+                Some(schema) => Message::SchemaReady(Arc::new(schema)),
+                None => Message::Noop,
+            },
+        )
+    }
+
+    /// Uses `schema` for suggestions if it belongs to this editor's connection.
+    pub fn set_schema(&mut self, connection: &str, schema: Arc<Schema>) {
+        if self.config.name == connection {
+            self.schema = Some(schema);
+        }
     }
 
     pub fn connection_string(&self) -> String {
@@ -275,22 +356,11 @@ impl EditorConfig {
 
     fn view_query_editor(&self) -> Element<'_, Message> {
         container(
-            text_editor(&self.editor)
-                .on_action(Message::EditorAction)
-                .highlight("sql", iced::highlighter::Theme::Base16Eighties)
-                .height(Length::FillPortion(1))
+            widgets::sql_editor::SqlEditor::new(&self.editor, Message::EditorAction)
+                .height(Length::Fill)
                 .font(iced::Font::MONOSPACE)
                 .size(14)
-                .id(self.id.0.to_string())
-                .style(|_theme, _status| text_editor::Style {
-                    background: Background::Color(Color::TRANSPARENT),
-                    border: iced::Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
-                        radius: iced::border::Radius::new(0),
-                    },
-                    ..text_editor::default(_theme, _status)
-                }),
+                .id(self.id.0.to_string()),
         )
         .style(|theme: &Theme| {
             let palette = theme.palette();
