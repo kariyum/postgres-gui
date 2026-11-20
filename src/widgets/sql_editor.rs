@@ -1558,8 +1558,9 @@ where
                     shell.publish((self.on_action)(action));
                     shell.request_redraw();
                     shell.capture_event();
-                } else if !shell.is_event_captured() {
+                } else if state.focused {
                     state.focused = false;
+                    shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {

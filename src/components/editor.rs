@@ -1,17 +1,24 @@
 use iced::{
     Element, Length, Task,
-    widget::{self, Row, button, column, container, operation, row, scrollable, space, text},
+    widget::{
+        self, Column, button, column, container, operation, pane_grid, row, rule, scrollable,
+        space, text,
+    },
 };
 
-use crate::components::{
-    editor::Message::EditorConfigMessage,
-    editor_config::{self, EditorConfig, EditorId},
-};
+use crate::components::editor_config::{self, EditorConfig, EditorId};
+
+#[derive(Debug, Clone)]
+enum EditorPane {
+    Tabs,
+    Body,
+}
 
 #[derive(Debug, Clone)]
 pub struct Editor {
     windows: Vec<EditorConfig>,
     focused: Option<EditorId>,
+    panes: pane_grid::State<EditorPane>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,14 +29,22 @@ pub enum Message {
     NewRequested,
     RunQuery,
     FormatQuery,
+    Resized(pane_grid::ResizeEvent),
     EditorConfigMessage(EditorId, editor_config::Message),
 }
 
 impl Default for Editor {
     fn default() -> Self {
+        let (mut panes, tabs_pane) = pane_grid::State::new(EditorPane::Tabs);
+        if let Some((_body_pane, split)) =
+            panes.split(pane_grid::Axis::Vertical, tabs_pane, EditorPane::Body)
+        {
+            panes.resize(split, 0.16);
+        }
         Self {
             windows: Vec::new(),
             focused: None,
+            panes,
         }
     }
 }
@@ -62,14 +77,24 @@ impl Editor {
         match self.focused_window() {
             Some(window) => {
                 let id = window.id();
-                column![
-                    self.view_header(),
-                    window
-                        .view()
-                        .map(move |msg| Message::EditorConfigMessage(id, msg))
-                ]
+                pane_grid::PaneGrid::new(&self.panes, |_pane, kind, _is_maximized| match kind {
+                    EditorPane::Tabs => pane_grid::Content::new(self.view_header()),
+                    EditorPane::Body => pane_grid::Content::new(
+                        row![
+                            rule::vertical(1),
+                            window
+                                .view()
+                                .map(move |msg| Message::EditorConfigMessage(id, msg))
+                        ]
+                        .spacing(0)
+                        .height(Length::Fill)
+                        .width(Length::Fill),
+                    ),
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
                 .spacing(0)
-                .padding(0)
+                .on_resize(5, Message::Resized)
                 .into()
             }
 
@@ -82,7 +107,7 @@ impl Editor {
 
     fn view_header(&self) -> Element<'_, Message> {
         let tabs = scrollable(
-            Row::from_vec(
+            Column::from_vec(
                 self.windows
                     .iter()
                     .map(|window| {
@@ -94,21 +119,30 @@ impl Editor {
                     })
                     .collect(),
             )
-            .spacing(1),
+            .spacing(1)
+            .width(Length::Fill),
         )
-        .direction(widget::scrollable::Direction::Horizontal(
+        .direction(widget::scrollable::Direction::Vertical(
             widget::scrollable::Scrollbar::default(),
         ))
-        .width(Length::Fill);
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         let new_button = button(text("+").size(14))
             .on_press(Message::NewRequested)
-            .padding([0, 8])
+            .padding([2, 8])
             .style(button::subtle);
 
-        container(row![tabs, new_button].align_y(iced::Alignment::Center))
+        let top_bar = container(
+            row![text("Tabs").size(12), space::horizontal(), new_button]
+                .align_y(iced::Alignment::Center),
+        )
+        .padding([4, 8])
+        .width(Length::Fill);
+
+        container(column![top_bar, rule::horizontal(1), tabs].spacing(0))
             .width(Length::Fill)
-            .height(30)
+            .height(Length::Fill)
             .style(|theme: &iced::Theme| {
                 let palette = theme.palette();
                 container::Style {
@@ -177,6 +211,10 @@ impl Editor {
                 } else {
                     Task::none()
                 }
+            }
+            Message::Resized(event) => {
+                self.panes.resize(event.split, event.ratio);
+                Task::none()
             }
             Message::EditorConfigMessage(id, msg) => match msg {
                 editor_config::Message::Select => Task::done(Message::Focus(id)),

@@ -8,13 +8,15 @@ use crate::{components::connection_config::ConnectionConfig, widgets};
 use anyhow::Context;
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
-use iced::{Alignment, padding};
 use iced::widget::{operation, space};
+use iced::{Alignment, padding};
 use iced::{
     Background, Color, Element, Length, Task, Theme,
     alignment::{self, Horizontal::Left},
     theme,
-    widget::{Column, button, column, container, pane_grid, row, rule, svg, text, text_editor},
+    widget::{
+        Column, button, column, container, pane_grid, row, rule, svg, text, text_editor, text_input,
+    },
 };
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -33,6 +35,7 @@ pub struct EditorConfig {
     id: EditorId,
     config: ConnectionConfig,
     database: String,
+    title: String,
     editor: widgets::sql_editor::Content,
     schema: Option<Arc<Schema>>,
     panes: pane_grid::State<PaneKind>,
@@ -54,6 +57,8 @@ enum PaneKind {
 pub enum Message {
     Select,
     Close,
+    TitleChanged(String),
+    FocusEditor,
     EditorAction(widgets::sql_editor::Action),
     SchemaReady(Arc<Schema>),
     Noop,
@@ -80,6 +85,7 @@ impl EditorConfig {
         Self {
             id: EditorId(Uuid::new_v4()),
             database: connection_config.database.clone(),
+            title: connection_config.database.clone(),
             config: connection_config,
             editor: widgets::sql_editor::Content::new(),
             schema: None,
@@ -97,6 +103,11 @@ impl EditorConfig {
         match msg {
             Message::Select => Task::none(),
             Message::Close => Task::none(),
+            Message::TitleChanged(title) => {
+                self.title = title;
+                Task::none()
+            }
+            Message::FocusEditor => self.focus(),
             Message::EditorAction(action) => {
                 self.apply_editor_action(action);
                 Task::none()
@@ -184,8 +195,7 @@ impl EditorConfig {
                 let formatted = crate::core::sql_format::format_sql(&current);
                 if formatted != current {
                     self.editor.set_completion(None);
-                    self.editor
-                        .perform(widgets::sql_editor::Action::SelectAll);
+                    self.editor.perform(widgets::sql_editor::Action::SelectAll);
                     self.editor
                         .perform(widgets::sql_editor::Action::Paste(formatted));
                 }
@@ -218,7 +228,10 @@ impl EditorConfig {
 
         let popup = match &action {
             A::Type(text) => {
-                if text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+                if text
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+                {
                     Popup::Refresh { force: false }
                 } else {
                     Popup::Dismiss
@@ -245,8 +258,11 @@ impl EditorConfig {
             Popup::Keep => {}
             Popup::Dismiss => self.editor.set_completion(None),
             Popup::Refresh { force } => {
-                let completion =
-                    crate::core::sql_completion::suggest(self.schema.as_deref(), &self.editor, force);
+                let completion = crate::core::sql_completion::suggest(
+                    self.schema.as_deref(),
+                    &self.editor,
+                    force,
+                );
                 self.editor.set_completion(completion);
             }
         }
@@ -280,6 +296,15 @@ impl EditorConfig {
         self.config.connection_string()
     }
 
+    fn display_name(&self) -> &str {
+        let trimmed = self.title.trim();
+        if trimmed.is_empty() {
+            &self.database
+        } else {
+            trimmed
+        }
+    }
+
     pub fn view_header(&self, is_focused: bool) -> Element<'_, Message> {
         let close_btn = button(
             svg(svg::Handle::from_memory(include_bytes!(
@@ -303,14 +328,24 @@ impl EditorConfig {
                 ..Default::default()
             }
         });
+        let label = container(
+            text(self.display_name())
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::End)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .clip(true);
+
         button(
-            row![text(&self.database), close_btn]
+            row![label, close_btn]
                 .align_y(alignment::Alignment::Center)
-                .spacing(6),
+                .spacing(6)
+                .width(Length::Fill),
         )
         .on_press(Message::Select)
-        .padding([4, 6])
-        .height(Length::Fill)
+        .padding([6, 8])
+        .width(Length::Fill)
         .style(move |theme, status| button::Style {
             border: iced::Border::default().width(0),
             background: if matches!(status, button::Status::Active) && !is_focused {
@@ -337,6 +372,8 @@ impl EditorConfig {
 
     fn view_editor(&self) -> Element<'_, Message> {
         container(column![
+            self.view_title_bar(),
+            rule::horizontal(1),
             self.view_toolbar(),
             rule::horizontal(1),
             self.view_query_editor()
@@ -344,6 +381,30 @@ impl EditorConfig {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+    }
+
+    fn view_title_bar(&self) -> Element<'_, Message> {
+        let title_input = text_input(&self.database, &self.title)
+            .on_input(Message::TitleChanged)
+            .on_submit(Message::FocusEditor)
+            .size(14)
+            .padding(0)
+            .width(Length::Fill)
+            .style(|theme: &Theme, status| {
+                let mut base = text_input::default(theme, status);
+                base.background = Background::Color(Color::TRANSPARENT);
+                base.border = iced::Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                };
+                base
+            });
+
+        container(title_input)
+            .padding([4, 8])
+            .width(Length::Fill)
+            .into()
     }
 
     fn view_toolbar(&self) -> Element<'_, Message> {
