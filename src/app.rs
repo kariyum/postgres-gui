@@ -991,6 +991,11 @@ impl App {
                         iced::keyboard::Modifiers::CTRL,
                         iced::keyboard::Key::Named(Named::Enter),
                     ) => Some(Message::Editor(editor::Message::RunQuery)),
+                    (modifiers, iced::keyboard::Key::Character("f" | "F"))
+                        if modifiers.control() && modifiers.shift() =>
+                    {
+                        Some(Message::Editor(editor::Message::FormatQuery))
+                    }
                     (_, iced::keyboard::Key::Named(Named::Escape)) => Some(Message::Escape),
                     _ => None,
                 }

@@ -71,6 +71,7 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub enum ToolbarActions {
     RunQuery,
+    FormatQuery,
 }
 
 impl EditorConfig {
@@ -177,6 +178,18 @@ impl EditorConfig {
                     },
                     |pool| Message::PoolReady { pool, query },
                 )
+            }
+            ToolbarActions::FormatQuery => {
+                let current = self.editor.text();
+                let formatted = crate::core::sql_format::format_sql(&current);
+                if formatted != current {
+                    self.editor.set_completion(None);
+                    self.editor
+                        .perform(widgets::sql_editor::Action::SelectAll);
+                    self.editor
+                        .perform(widgets::sql_editor::Action::Paste(formatted));
+                }
+                Task::none()
             }
         }
     }
@@ -349,9 +362,28 @@ impl EditorConfig {
         .on_press(Message::ToolbarActions(ToolbarActions::RunQuery))
         .style(button::subtle);
 
-        container(row![run_btn,].align_y(iced::Alignment::Center))
-            .padding([6, 4])
-            .into()
+        let format_btn = button(
+            row![
+                svg(svg::Handle::from_memory(include_bytes!(
+                    "../resources/format.svg"
+                )))
+                .height(12)
+                .width(12),
+                text("Format").size(12)
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::ToolbarActions(ToolbarActions::FormatQuery))
+        .style(button::subtle);
+
+        container(
+            row![run_btn, format_btn]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+        )
+        .padding([6, 4])
+        .into()
     }
 
     fn view_query_editor(&self) -> Element<'_, Message> {

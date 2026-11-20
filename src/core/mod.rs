@@ -6,3 +6,4 @@ pub mod configured_provider;
 pub mod database_keeper;
 pub mod provider;
 pub mod sql_completion;
+pub mod sql_format;

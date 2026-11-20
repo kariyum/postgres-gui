@@ -21,6 +21,7 @@ pub enum Message {
     Focus(EditorId),
     NewRequested,
     RunQuery,
+    FormatQuery,
     EditorConfigMessage(EditorId, editor_config::Message),
 }
 
@@ -158,6 +159,19 @@ impl Editor {
                         id,
                         editor_config::Message::ToolbarActions(
                             editor_config::ToolbarActions::RunQuery,
+                        ),
+                    ))
+                } else {
+                    Task::none()
+                }
+            }
+            Message::FormatQuery => {
+                if let Some(window) = self.focused_window() {
+                    let id = window.id();
+                    Task::done(Message::EditorConfigMessage(
+                        id,
+                        editor_config::Message::ToolbarActions(
+                            editor_config::ToolbarActions::FormatQuery,
                         ),
                     ))
                 } else {
