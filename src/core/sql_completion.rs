@@ -44,9 +44,20 @@ fn is_keyword(lower: &str) -> bool {
 }
 
 fn starts_with_ci(haystack: &str, prefix: &str) -> bool {
-    haystack
-        .to_lowercase()
-        .starts_with(&prefix.to_lowercase())
+    if prefix.is_empty() {
+        return true;
+    }
+    if haystack.is_ascii() && prefix.is_ascii() {
+        return haystack.len() >= prefix.len()
+            && haystack.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes());
+    }
+    let mut h = haystack.chars().flat_map(char::to_lowercase);
+    for p in prefix.chars().flat_map(char::to_lowercase) {
+        if h.next() != Some(p) {
+            return false;
+        }
+    }
+    true
 }
 
 fn quote_ident(name: &str) -> String {
@@ -64,11 +75,14 @@ fn quote_ident(name: &str) -> String {
     }
 }
 
-/// Splits SQL into tokens. Qualified names (`a.b`) stay a single token, quotes
-/// are stripped, strings collapse to `'`, and comments are dropped.
-fn tokenize(chars: &[char]) -> Vec<String> {
+/// Splits SQL into tokens in a single pass. Qualified names (`a.b`) stay a
+/// single token, quotes are stripped, strings collapse to `'`, and comments
+/// are dropped. Also returns the number of tokens that started before
+/// `split_at` (a char index into `chars`).
+fn tokenize_with_split(chars: &[char], split_at: usize) -> (Vec<String>, usize) {
     let n = chars.len();
     let mut out = Vec::new();
+    let mut before_count = 0;
     let mut i = 0;
     while i < n {
         let c = chars[i];
@@ -86,13 +100,18 @@ fn tokenize(chars: &[char]) -> Vec<String> {
             }
             i += 2;
         } else if c == '\'' {
+            let start = i;
             i += 1;
             while i < n && chars[i] != '\'' {
                 i += 1;
             }
             i += 1;
             out.push("'".to_string());
+            if start < split_at {
+                before_count = out.len();
+            }
         } else if is_word(c) || c == '"' {
+            let start = i;
             let mut tok = String::new();
             loop {
                 if i < n && chars[i] == '"' {
@@ -117,12 +136,19 @@ fn tokenize(chars: &[char]) -> Vec<String> {
                 }
             }
             out.push(tok);
+            if start < split_at {
+                before_count = out.len();
+            }
         } else {
+            let start = i;
             out.push(c.to_string());
+            if start < split_at {
+                before_count = out.len();
+            }
             i += 1;
         }
     }
-    out
+    (out, before_count)
 }
 
 fn is_ident(token: &str) -> bool {
@@ -205,11 +231,17 @@ fn find_table<'a>(
     found
 }
 
-fn column_items(schema_name: &str, table: &TableInfo, with_table: bool) -> Vec<CompletionItem> {
+fn column_items(
+    schema_name: &str,
+    table: &TableInfo,
+    with_table: bool,
+    prefix: &str,
+) -> Vec<CompletionItem> {
     let _ = schema_name;
     table
         .columns
         .iter()
+        .filter(|c| starts_with_ci(&c.name, prefix))
         .map(|c| CompletionItem {
             label: c.name.clone(),
             insert: quote_ident(&c.name),
@@ -226,19 +258,24 @@ fn column_items(schema_name: &str, table: &TableInfo, with_table: bool) -> Vec<C
         .collect()
 }
 
-fn table_items(schema: &Schema) -> Vec<CompletionItem> {
+fn table_items(schema: &Schema, prefix: &str) -> Vec<CompletionItem> {
     let mut public = Vec::new();
     let mut other = Vec::new();
     let mut views = Vec::new();
     let mut schemas = Vec::new();
     for s in &schema.schemas {
-        schemas.push(CompletionItem {
-            label: s.name.clone(),
-            insert: quote_ident(&s.name),
-            detail: "schema".into(),
-            kind: ItemKind::Schema,
-        });
+        if starts_with_ci(&s.name, prefix) {
+            schemas.push(CompletionItem {
+                label: s.name.clone(),
+                insert: quote_ident(&s.name),
+                detail: "schema".into(),
+                kind: ItemKind::Schema,
+            });
+        }
         for t in &s.tables {
+            if !starts_with_ci(&t.name, prefix) {
+                continue;
+            }
             let item = CompletionItem {
                 label: t.name.clone(),
                 insert: if s.name == "public" {
@@ -256,6 +293,9 @@ fn table_items(schema: &Schema) -> Vec<CompletionItem> {
             }
         }
         for v in &s.views {
+            if !starts_with_ci(&v.name, prefix) {
+                continue;
+            }
             views.push(CompletionItem {
                 label: v.name.clone(),
                 insert: if s.name == "public" {
@@ -273,6 +313,81 @@ fn table_items(schema: &Schema) -> Vec<CompletionItem> {
     out.extend(views);
     out.extend(schemas);
     out
+}
+
+/// Extracts only the statement surrounding `(cursor_line, prefix_col..cursor_col)`
+/// (delimited by `;`) without joining the entire document. Returns the statement's
+/// chars and the char index of `prefix_col` within it.
+fn statement_around_caret(
+    content: &Content,
+    cursor_line: usize,
+    prefix_col: usize,
+    cursor_col: usize,
+) -> (Vec<char>, usize) {
+    let cur_str = content.line(cursor_line).unwrap_or("");
+    let prefix_byte = cur_str
+        .char_indices()
+        .nth(prefix_col)
+        .map_or(cur_str.len(), |(i, _)| i);
+    let cursor_byte = cur_str
+        .char_indices()
+        .nth(cursor_col)
+        .map_or(cur_str.len(), |(i, _)| i);
+
+    // Find start of statement by scanning backward from (cursor_line, prefix_byte).
+    let (start_line, start_byte) = if let Some(semi) = cur_str[..prefix_byte].rfind(';') {
+        (cursor_line, semi + 1)
+    } else {
+        let mut l = cursor_line;
+        let mut sb = 0;
+        while l > 0 {
+            l -= 1;
+            let s = content.line(l).unwrap_or("");
+            if let Some(semi) = s.rfind(';') {
+                sb = semi + 1;
+                break;
+            }
+        }
+        (l, sb)
+    };
+
+    // Find end of statement by scanning forward from (cursor_line, cursor_byte).
+    let line_count = content.line_count();
+    let (end_line, end_byte) = if let Some(semi) = cur_str[cursor_byte..].find(';') {
+        (cursor_line, cursor_byte + semi)
+    } else {
+        let mut l = cursor_line;
+        let mut eb = cur_str.len();
+        while l + 1 < line_count {
+            l += 1;
+            let s = content.line(l).unwrap_or("");
+            if let Some(semi) = s.find(';') {
+                eb = semi;
+                break;
+            }
+            eb = s.len();
+        }
+        (l, eb)
+    };
+
+    let mut chars = Vec::new();
+    let mut prefix_offset = 0;
+    for l in start_line..=end_line {
+        if l > start_line {
+            chars.push('\n');
+        }
+        let s = content.line(l).unwrap_or("");
+        let lo = if l == start_line { start_byte } else { 0 };
+        let hi = if l == end_line { end_byte } else { s.len() };
+        if l == cursor_line {
+            chars.extend(s[lo..prefix_byte].chars());
+            prefix_offset = chars.len();
+            chars.extend(s[prefix_byte..hi].chars());
+        } else {
+            chars.extend(s[lo..hi].chars());
+        }
+    }
+    (chars, prefix_offset)
 }
 
 /// Computes the suggestions for the caret position of `content`.
@@ -327,23 +442,10 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
         return None;
     }
 
-    // Statement around the caret (split on `;`).
-    let all: Vec<char> = content.text().chars().collect();
-    let offset: usize = (0..cursor.line)
-        .map(|i| content.line(i).map_or(0, |l| l.chars().count()) + 1)
-        .sum::<usize>()
-        + col;
-    let prefix_offset = offset - (col - start);
-    let stmt_start = all[..prefix_offset]
-        .iter()
-        .rposition(|c| *c == ';')
-        .map_or(0, |i| i + 1);
-    let stmt_end = all[offset..]
-        .iter()
-        .position(|c| *c == ';')
-        .map_or(all.len(), |i| offset + i);
-    let before_tokens = tokenize(&all[stmt_start..prefix_offset]);
-    let all_tokens = tokenize(&all[stmt_start..stmt_end]);
+    // Statement around the caret (split on `;`), without joining the full document.
+    let (stmt_chars, prefix_offset) = statement_around_caret(content, cursor.line, start, col);
+    let (all_tokens, before_count) = tokenize_with_split(&stmt_chars, prefix_offset);
+    let before_tokens = &all_tokens[..before_count];
     let refs = table_refs(&all_tokens);
 
     let mut items: Vec<CompletionItem> = Vec::new();
@@ -360,7 +462,7 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
         if let Some(r) = by_ref
             && let Some((s, t)) = find_table(schema, r.schema.as_deref(), &r.name)
         {
-            items.extend(column_items(&s.name, t, false));
+            items.extend(column_items(&s.name, t, false, &prefix));
         } else if let Some(s) = schema
             .schemas
             .iter()
@@ -368,6 +470,9 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
         {
             // 2. A schema: list its tables and views.
             for t in &s.tables {
+                if !starts_with_ci(&t.name, &prefix) {
+                    continue;
+                }
                 items.push(CompletionItem {
                     label: t.name.clone(),
                     insert: quote_ident(&t.name),
@@ -376,6 +481,9 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
                 });
             }
             for v in &s.views {
+                if !starts_with_ci(&v.name, &prefix) {
+                    continue;
+                }
                 items.push(CompletionItem {
                     label: v.name.clone(),
                     insert: quote_ident(&v.name),
@@ -385,34 +493,32 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
             }
         } else if let Some((s, t)) = find_table(schema, None, &q) {
             // 3. A table name that is not (yet) in the FROM clause.
-            items.extend(column_items(&s.name, t, false));
+            items.extend(column_items(&s.name, t, false, &prefix));
         }
-        items.retain(|i| starts_with_ci(&i.label, &prefix));
-        items.sort_by_key(|i| i.label.to_lowercase());
+        items.sort_by(|a, b| a.label.to_ascii_lowercase().cmp(&b.label.to_ascii_lowercase()));
     } else {
         // Decide between table context and column context.
-        let lower: Vec<String> = before_tokens.iter().map(|t| t.to_lowercase()).collect();
         let mut table_context = false;
-        for (idx, tok) in lower.iter().enumerate().rev() {
-            if TABLE_KWS.contains(&tok.as_str()) {
-                table_context = !(tok == "into"
+        for (idx, tok) in before_tokens.iter().enumerate().rev() {
+            if TABLE_KWS.iter().any(|kw| tok.eq_ignore_ascii_case(kw)) {
+                table_context = !(tok.eq_ignore_ascii_case("into")
                     && before_tokens[idx + 1..].iter().any(|t| t == "("));
                 break;
             }
-            if COLUMN_KWS.contains(&tok.as_str()) {
+            if COLUMN_KWS.iter().any(|kw| tok.eq_ignore_ascii_case(kw)) {
                 break;
             }
         }
 
         if table_context {
             if let Some(schema) = schema {
-                items.extend(table_items(schema));
+                items.extend(table_items(schema, &prefix));
             }
         } else if let Some(schema) = schema {
             let mut seen = std::collections::HashSet::new();
             for r in &refs {
                 if let Some((s, t)) = find_table(schema, r.schema.as_deref(), &r.name) {
-                    for item in column_items(&s.name, t, true) {
+                    for item in column_items(&s.name, t, true, &prefix) {
                         if seen.insert(item.label.clone()) {
                             items.push(item);
                         }
@@ -420,10 +526,13 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
                 }
             }
             for r in &refs {
-                let name = r.alias.clone().unwrap_or_else(|| r.name.clone());
+                let name = r.alias.as_deref().unwrap_or(&r.name);
+                if !starts_with_ci(name, &prefix) {
+                    continue;
+                }
                 items.push(CompletionItem {
-                    label: name.clone(),
-                    insert: quote_ident(&name),
+                    label: name.to_string(),
+                    insert: quote_ident(name),
                     detail: if r.alias.is_some() {
                         format!("alias of {}", r.name)
                     } else {
@@ -433,7 +542,6 @@ pub fn suggest(schema: Option<&Schema>, content: &Content, force: bool) -> Optio
                 });
             }
         }
-        items.retain(|i| starts_with_ci(&i.label, &prefix));
 
         if !table_context {
             for f in FUNCTIONS {
