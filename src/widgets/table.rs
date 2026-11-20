@@ -381,9 +381,9 @@ where
         R: text::Renderer<Font = iced::Font>,
     {
         let header_bounds = iced::Rectangle {
-            x: GUTTER_WIDTH,
+            x: layout_bounds.x + GUTTER_WIDTH,
             height: state.header_height,
-            width: layout_bounds.width - GUTTER_WIDTH,
+            width: (layout_bounds.width - GUTTER_WIDTH).max(0.0),
             ..layout_bounds
         };
         renderer.fill_quad(
@@ -436,10 +436,10 @@ where
         R: text::Renderer<Font = iced::Font>,
     {
         let body_bounds = iced::Rectangle {
-            x: GUTTER_WIDTH,
+            x: layout_bounds.x + GUTTER_WIDTH,
             y: layout_bounds.y + state.header_height,
-            width: layout_bounds.width - GUTTER_WIDTH,
-            height: layout_bounds.height - state.header_height,
+            width: (layout_bounds.width - GUTTER_WIDTH).max(0.0),
+            height: (layout_bounds.height - state.header_height).max(0.0),
         };
 
         renderer.with_layer(body_bounds, |renderer| {
@@ -670,12 +670,12 @@ where
             let col_width = state.column_widths[i];
             running_width_sum += col_width;
             let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
-            let separator_x = bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
+            let separator_x = GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
 
             if (position.x - separator_x).abs() <= 5.0 {
                 return Some(Drag::ColumnResize(ColumnResize {
                     left_col_index: i,
-                    start_x: position.x,
+                    start_x: bounds.x + position.x,
                     left_start_width: col_width,
                     right_start_width: state.column_widths
                         [(i + 1).min(state.column_widths.len() - 1)],
@@ -836,7 +836,7 @@ where
                 };
                 running_width_sum += col_width;
                 let boundary_x = running_width_sum + (i + 1) as f32 * 2.0 * self.padding_x;
-                let separator_x = bounds.x + GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
+                let separator_x = GUTTER_WIDTH + boundary_x - state.scroll_offset.x;
 
                 if (position.x - separator_x).abs() <= 5.0 {
                     return mouse::Interaction::ResizingHorizontally;
